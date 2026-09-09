@@ -1,0 +1,43 @@
+# dependencies
+node_modules/
+.next/
+out/
+build/
+*.tsbuildinfo
+next-env.d.ts
+
+# environment
+.env
+.env.local
+.env.*.local
+
+# data (private corpus / indexes / uploads / logs)
+data/
+indexes/
+uploads/
+logs/
+*.log
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# editor / os
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# vercel
+.vercel/
+
+# runtime artifacts
+*.sqlite3
+*.db
