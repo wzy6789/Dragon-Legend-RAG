@@ -206,7 +206,7 @@ export default function ChatInterface() {
         <div className="mb-2 flex items-center justify-between">
           <TierSwitch value={tier} onChange={setTier} disabled={busy} />
           <span className="hidden text-[11px] text-mist-500 sm:inline">
-            {tier === "flash" ? "RAG1.0 · 快速简洁" : "RAG2.1 · 拆解·检索·核验·组织"}
+            {tier === "flash" ? "快速直答" : "拆解 · 检索 · 核验 · 组织"}
           </span>
         </div>
         <div className="flex items-end gap-2 rounded-xl border border-ink-700 bg-ink-850/80 p-2 focus-within:border-brass-500/40">

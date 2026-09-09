@@ -11,11 +11,10 @@ interface Props {
 const OPTIONS: {
   key: Tier;
   name: string;
-  badge: string;
   desc: string;
 }[] = [
-  { key: "flash", name: "Flash", badge: "RAG1.0", desc: "快速 · 简洁" },
-  { key: "pro", name: "Pro", badge: "RAG2.1", desc: "深入 · 证据核验" },
+  { key: "flash", name: "Flash", desc: "快速回答" },
+  { key: "pro", name: "Pro", desc: "深度考据" },
 ];
 
 export default function TierSwitch({ value, onChange, disabled }: Props) {
@@ -38,16 +37,6 @@ export default function TierSwitch({ value, onChange, disabled }: Props) {
             }
           >
             <span className="font-medium">{o.name}</span>
-            <span
-              className={
-                "rounded border px-1 text-[10px] leading-4 tracking-wide " +
-                (active
-                  ? "border-brass-500/40 text-brass-400"
-                  : "border-ink-600 text-mist-500")
-              }
-            >
-              {o.badge}
-            </span>
             <span className="hidden text-[11px] text-mist-500 sm:inline">{o.desc}</span>
           </button>
         );

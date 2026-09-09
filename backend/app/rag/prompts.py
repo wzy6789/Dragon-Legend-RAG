@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""提示词模板（RAG1.0 / RAG2.1）。"""
+"""提示词模板（Flash v1.2 / Pro v2.1）。"""
 from __future__ import annotations
 
 SYSTEM_CORE = (

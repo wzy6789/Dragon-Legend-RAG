@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, description="用户消息")
-    tier: Literal["flash", "pro"] = Field("flash", description="flash=RAG1.0，pro=RAG2.1")
+    tier: Literal["flash", "pro"] = Field("flash", description="flash=v1.2 知识档案，pro=v2.1 Ewe+覆盖规划")
     conversation_id: Optional[str] = Field(None, description="会话 id；不传则由后端生成")
 
 

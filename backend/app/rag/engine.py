@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """RAG 引擎：tier → 管线映射。
 
-- flash → RAG1.0：单轮 BM25/向量检索 + 简洁回答（快速）。
-- pro   → RAG2.1（内部实现 RAG4 多阶段）：
+- flash → v1.2 知识档案：单轮混合检索 + 简洁回答（快速）。
+- pro   → v2.1 Ewe + 覆盖规划：
     拆解问题 → 多路检索 → 证据核验 → 组织回答。
 """
 from __future__ import annotations
@@ -34,7 +34,9 @@ def _format_context(hits: list[dict], max_chars: int = 6000) -> str:
     parts = []
     used = 0
     for h in hits:
-        label = h.get("chapter") or f"第{h.get('chapter_index')}章" or h.get("title") or ""
+        label = h.get("chapter") or h.get("title") or (
+            f"第{h['chapter_index']}章" if h.get("chapter_index") is not None else "资料片段"
+        )
         block = f"【{label}】\n{h.get('text', '')}"
         if used + len(block) > max_chars:
             block = block[: max(0, max_chars - used)] + "…"
@@ -52,7 +54,7 @@ class RAGEngine:
         self.llm = LLMClient()
         self.retriever = get_retriever()
 
-    # ---------------- Flash: RAG1.0 ----------------
+    # ---------------- Flash: v1.2 知识档案 ----------------
     async def stream_flash(
         self, question: str, history: Optional[list[dict]] = None
     ) -> AsyncIterator[tuple[str, dict]]:
@@ -68,7 +70,7 @@ class RAGEngine:
                 yield "token", {"text": piece}
         yield "sources", {"sources": sources}
 
-    # ---------------- Pro: RAG2.1 / 多阶段 ----------------
+    # ---------------- Pro: v2.1 Ewe + 覆盖规划 ----------------
     async def stream_pro(
         self, question: str, history: Optional[list[dict]] = None
     ) -> AsyncIterator[tuple[str, dict]]:

@@ -81,7 +81,7 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
 
     async def event_stream():
         try:
-            history = chat.get_history(req.conversation_id)
+            history = chat.get_history(conv_id)
             answer_parts: list[str] = []
             pipeline = (
                 engine.stream_pro(req.message, history=history)
@@ -97,8 +97,7 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
                 elif event == "sources":
                     yield sources_event(payload["sources"])
             answer = "".join(answer_parts)
-            if req.conversation_id:
-                chat.push_turn(req.conversation_id, req.message, answer)
+            chat.push_turn(conv_id, req.message, answer)
             yield done_event(conv_id)
         except Exception as exc:
             yield error_event(f"服务器处理失败：{exc}")
