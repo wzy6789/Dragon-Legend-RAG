@@ -33,7 +33,10 @@ class Settings:
     max_history_turns: int = field(default_factory=lambda: int(_env("MAX_HISTORY_TURNS", "12") or 12))
 
     def __post_init__(self) -> None:
-        raw = _env("CORS_ORIGINS", "http://localhost:3000")
+        raw = _env(
+            "CORS_ORIGINS",
+            "http://localhost:3000,https://wzy6789.github.io",
+        )
         self.cors_origins = [o.strip() for o in raw.split(",") if o.strip()]
 
 

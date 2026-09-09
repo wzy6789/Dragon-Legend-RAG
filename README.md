@@ -100,6 +100,17 @@ Railway / Render 均可直接识别根 `backend/Dockerfile`：
 - **Render**：New Web Service → Root Directory = `backend`，Runtime = Docker；设置环境变量；可挂载 Disk 存放语料。
 - 部署后把公网域名填到前端 `NEXT_PUBLIC_API_URL`，并在后端 `CORS_ORIGINS` 加入前端域名（如 `https://*.vercel.app`）。
 
+#### Render 一键入口
+
+仓库根目录的 `render.yaml` 已预设 Docker 服务、健康检查和私有数据盘。登录 Render 后选择 **New + → Blueprint** 并连接本仓库；只需在创建页填写 `LLM_API_KEY`。服务创建后：
+
+1. 在 Render 的 Shell / Disk 中把你自己拥有的 `corpus.jsonl` 上传到 `/mnt/rag-data/corpus.jsonl`；
+2. 复制服务的 `https://...onrender.com` 地址；
+3. 在 GitHub 仓库 `Settings → Secrets and variables → Actions → Variables` 新增 `NEXT_PUBLIC_API_URL`，值为该地址；
+4. 在 Actions 手动重跑 **Deploy frontend to GitHub Pages**。
+
+默认跨域已允许 `https://wzy6789.github.io`，无需为 GitHub Pages 额外设置 CORS。
+
 ---
 
 ## 接口约定

@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: dragon-legend-rag-api
+    runtime: docker
+    rootDir: backend
+    dockerfilePath: Dockerfile
+    healthCheckPath: /api/health
+    envVars:
+      - key: LLM_API_KEY
+        sync: false
+      - key: LLM_BASE_URL
+        value: https://api.deepseek.com/v1
+      - key: LLM_MODEL
+        value: deepseek-chat
+      - key: RAG_DATA_PATH
+        value: /mnt/rag-data/corpus.jsonl
+      - key: MAX_HISTORY_TURNS
+        value: "12"
+    disk:
+      name: dragon-legend-private-data
+      mountPath: /mnt/rag-data
+      sizeGB: 1
