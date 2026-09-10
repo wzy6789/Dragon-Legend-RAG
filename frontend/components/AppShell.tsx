@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import type { Conversation, Tier } from "@/lib/types";
+import type { Conversation } from "@/lib/types";
 import Sidebar from "./Sidebar";
 import TopBar from "./TopBar";
 
@@ -9,12 +9,10 @@ interface Props {
   conversations: Conversation[];
   activeId: string | null;
   title: string;
-  tier: Tier;
   query: string;
   collapsed: boolean;
   mobileOpen: boolean;
   signedIn: boolean;
-  busy: boolean;
   onToggleCollapse: () => void;
   onOpenMobileSidebar: () => void;
   onCloseMobileSidebar: () => void;
@@ -23,7 +21,6 @@ interface Props {
   onSelectConversation: (id: string) => void;
   onRenameConversation: (id: string, title: string) => void;
   onDeleteConversation: (id: string) => void;
-  onTierChange: (t: Tier) => void;
   onOpenSettings: () => void;
   onClearHistory: () => void;
   children: ReactNode;
@@ -35,12 +32,10 @@ export default function AppShell({
   conversations,
   activeId,
   title,
-  tier,
   query,
   collapsed,
   mobileOpen,
   signedIn,
-  busy,
   onToggleCollapse,
   onOpenMobileSidebar,
   onCloseMobileSidebar,
@@ -49,7 +44,6 @@ export default function AppShell({
   onSelectConversation,
   onRenameConversation,
   onDeleteConversation,
-  onTierChange,
   onOpenSettings,
   onClearHistory,
   children,
@@ -79,9 +73,6 @@ export default function AppShell({
       <div className="flex min-w-0 flex-1 flex-col">
         <TopBar
           title={title}
-          tier={tier}
-          busy={busy}
-          onTierChange={onTierChange}
           onOpenSidebar={onOpenMobileSidebar}
           onOpenSettings={onOpenSettings}
         />

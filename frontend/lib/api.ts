@@ -1,3 +1,4 @@
+import { createSSEParser } from "./sse";
 import type { ApiError, ApiErrorKind, SourceItem, Tier } from "./types";
 
 /** 构建时注入；不要硬编码或替换该地址 */
@@ -17,6 +18,8 @@ export interface StreamHandlers {
   onSources?: (sources: SourceItem[]) => void;
   onDone?: (conversationId: string) => void;
   onError?: (error: ApiError) => void;
+  /** 首个 token 到达（用于延迟统计） */
+  onFirstToken?: () => void;
 }
 
 /** 面向用户的错误文案（按类型归一化） */
@@ -59,8 +62,10 @@ function toError(kind: ApiErrorKind): ApiError {
 }
 
 /**
- * 调用后端 /api/chat（SSE）。
+ * 调用后端 /api/chat（SSE 流式）。
  * 事件：stage / token / sources / done / error
+ *
+ * 使用增量解析器（兼容 CRLF 与 LF、单分片多事件），保证 token 到达即回调渲染。
  */
 export async function streamChat(
   opts: ChatRequestOptions,
@@ -70,8 +75,10 @@ export async function streamChat(
   try {
     res = await fetch(`${API_BASE}/api/chat`, {
       method: "POST",
+      cache: "no-store",
       headers: {
         "Content-Type": "application/json",
+        Accept: "text/event-stream",
         ...authHeaders(opts.accessKey, opts.llmApiKey),
       },
       body: JSON.stringify({
@@ -96,28 +103,26 @@ export async function streamChat(
     return;
   }
 
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder("utf-8");
-  let buffer = "";
+  let firstTokenSeen = false;
 
-  const dispatch = (raw: string) => {
-    const trimmed = raw.trim();
-    if (!trimmed) return;
-    const lines = trimmed.split("\n");
-    const evLine = lines.find((l) => l.startsWith("event:"));
-    const dataLine = lines.find((l) => l.startsWith("data:"));
-    if (!dataLine) return;
-    const event = evLine ? evLine.slice(6).trim() : "message";
+  const parser = createSSEParser(({ event, data }) => {
     let payload: Record<string, unknown>;
     try {
-      payload = JSON.parse(dataLine.slice(5).trim()) as Record<string, unknown>;
+      payload = JSON.parse(data) as Record<string, unknown>;
     } catch {
       return;
     }
     switch (event) {
-      case "token":
-        handlers.onToken?.(String(payload.text ?? ""));
+      case "token": {
+        const text = String(payload.text ?? "");
+        if (!text) return;
+        if (!firstTokenSeen) {
+          firstTokenSeen = true;
+          handlers.onFirstToken?.();
+        }
+        handlers.onToken?.(text);
         break;
+      }
       case "sources":
         handlers.onSources?.((payload.sources as SourceItem[]) ?? []);
         break;
@@ -130,19 +135,20 @@ export async function streamChat(
       default:
         break; // stage 等中间事件不展示
     }
-  };
+  });
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    let idx: number;
-    while ((idx = buffer.indexOf("\n\n")) >= 0) {
-      dispatch(buffer.slice(0, idx));
-      buffer = buffer.slice(idx + 2);
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder("utf-8");
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      parser.push(decoder.decode(value, { stream: true }));
     }
+    parser.flush();
+  } finally {
+    reader.releaseLock();
   }
-  if (buffer.trim()) dispatch(buffer);
 }
 
 /** 清除后端会话历史（新对话时调用；失败静默） */
@@ -155,6 +161,7 @@ export async function clearConversation(
   try {
     await fetch(`${API_BASE}/api/conversations/${encodeURIComponent(conversationId)}/clear`, {
       method: "POST",
+      cache: "no-store",
       headers: authHeaders(accessKey, llmApiKey),
     });
   } catch {

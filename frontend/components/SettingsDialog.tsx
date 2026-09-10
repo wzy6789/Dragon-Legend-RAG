@@ -144,8 +144,8 @@ export default function SettingsDialog({
           </div>
 
           <p className="text-[11.5px] leading-5 text-ink-faint">
-            访问密码与 API Key 仅保存在当前浏览器内存，刷新页面后需重新填写。不会保存到
-            GitHub、浏览器存储或服务器日志。
+            保存后会在本机浏览器记住登录（下次打开无需重复填写）；点击「退出当前连接」会立即清除本机保存的
+            访问密码与 API Key 并返回登录页。
           </p>
         </div>
 

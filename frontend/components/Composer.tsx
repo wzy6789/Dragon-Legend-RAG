@@ -2,6 +2,8 @@
 
 import { useEffect, useRef } from "react";
 import type { RefObject } from "react";
+import type { Tier } from "@/lib/types";
+import ModelSelector from "./ModelSelector";
 import { SendIcon, StopIcon } from "./icons";
 
 interface Props {
@@ -10,16 +12,20 @@ interface Props {
   onSend: () => void;
   onStop: () => void;
   busy: boolean;
+  tier: Tier;
+  onTierChange: (t: Tier) => void;
   inputRef?: RefObject<HTMLTextAreaElement | null>;
 }
 
-/** 底部输入区：固定在主内容区底部（不覆盖侧栏），最大阅读宽度 900px */
+/** 底部输入区（参考 ChatGPT）：模型选择器在输入框内左下，发送/停止在右下 */
 export default function Composer({
   value,
   onChange,
   onSend,
   onStop,
   busy,
+  tier,
+  onTierChange,
   inputRef,
 }: Props) {
   const localRef = useRef<HTMLTextAreaElement | null>(null);
@@ -38,31 +44,34 @@ export default function Composer({
   return (
     <div className="shrink-0 px-3 pb-3 sm:px-6 sm:pb-4">
       <div className="mx-auto w-full max-w-[900px]">
-        <div className="rounded-[14px] border border-white/[0.08] bg-[#15181D] px-3 py-2.5 transition-colors focus-within:border-gold-500/35">
-          <div className="flex items-end gap-2">
-            <textarea
-              ref={ref}
-              value={value}
-              onChange={(e) => onChange(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  if (e.nativeEvent.isComposing) return;
-                  e.preventDefault();
-                  if (canSend) onSend();
-                }
-              }}
-              rows={1}
-              placeholder="输入你的问题…"
-              aria-label="输入问题"
-              className="max-h-40 min-h-[28px] flex-1 resize-none bg-transparent px-1.5 py-1 text-[14.5px] leading-6 text-ink placeholder:text-ink-faint focus:outline-none"
-            />
+        <div className="rounded-[14px] border border-white/[0.08] bg-[#15181D] px-3 pb-2 pt-2.5 transition-colors focus-within:border-gold-500/35">
+          <textarea
+            ref={ref}
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                if (e.nativeEvent.isComposing) return;
+                e.preventDefault();
+                if (canSend) onSend();
+              }
+            }}
+            rows={1}
+            placeholder="输入你的问题…"
+            aria-label="输入问题"
+            className="max-h-40 min-h-[26px] w-full resize-none bg-transparent px-1.5 py-1 text-[14.5px] leading-6 text-ink placeholder:text-ink-faint focus:outline-none"
+          />
+
+          <div className="mt-1 flex items-center justify-between gap-2">
+            <ModelSelector value={tier} onChange={onTierChange} disabled={busy} />
+
             {busy ? (
               <button
                 type="button"
                 onClick={onStop}
                 aria-label="停止生成"
                 title="停止生成"
-                className="mb-0.5 shrink-0 rounded-[10px] border border-white/[0.1] p-2 text-ink-soft transition-colors hover:bg-white/[0.06] hover:text-ink"
+                className="shrink-0 rounded-[10px] border border-white/[0.1] p-1.5 text-ink-soft transition-colors hover:bg-white/[0.06] hover:text-ink"
               >
                 <StopIcon className="h-4 w-4" />
               </button>
@@ -74,7 +83,7 @@ export default function Composer({
                 aria-label="发送"
                 title="发送"
                 className={
-                  "mb-0.5 shrink-0 rounded-[10px] p-2 transition-colors " +
+                  "shrink-0 rounded-[10px] p-1.5 transition-colors " +
                   (canSend
                     ? "bg-gold-500 text-[#15181D] hover:bg-gold-400"
                     : "cursor-not-allowed bg-white/[0.05] text-ink-faint")
@@ -85,6 +94,7 @@ export default function Composer({
             )}
           </div>
         </div>
+
         <p className="mt-2 px-1 text-[11px] text-ink-faint">
           回答基于完整知识库；重要结论建议核对原著。
         </p>

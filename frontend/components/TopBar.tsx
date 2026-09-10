@@ -1,26 +1,15 @@
 "use client";
 
-import type { Tier } from "@/lib/types";
-import ModelSelector from "./ModelSelector";
+import { memo } from "react";
 import { MenuIcon, SettingsIcon } from "./icons";
 
 interface Props {
   title: string;
-  tier: Tier;
-  busy?: boolean;
-  onTierChange: (t: Tier) => void;
   onOpenSidebar: () => void;
   onOpenSettings: () => void;
 }
 
-export default function TopBar({
-  title,
-  tier,
-  busy,
-  onTierChange,
-  onOpenSidebar,
-  onOpenSettings,
-}: Props) {
+function TopBarImpl({ title, onOpenSidebar, onOpenSettings }: Props) {
   return (
     <header className="flex h-14 shrink-0 items-center gap-2 border-b border-white/[0.08] px-3 sm:px-4">
       <button
@@ -33,15 +22,12 @@ export default function TopBar({
         <MenuIcon className="h-4 w-4" />
       </button>
 
-      {/* 面包屑：龙王传说 / 当前对话 */}
       <div className="flex min-w-0 items-center gap-2">
         <span className="hidden text-[12.5px] text-ink-muted sm:inline">龙王传说</span>
         <span className="hidden text-ink-faint sm:inline">/</span>
-        <span className="max-w-[38vw] truncate text-[13px] text-ink-soft">{title}</span>
-      </div>
-
-      <div className="ml-1">
-        <ModelSelector value={tier} onChange={onTierChange} disabled={busy} />
+        <span className="max-w-[46vw] truncate text-[13px] text-ink-soft lg:max-w-[320px]">
+          {title}
+        </span>
       </div>
 
       <div className="ml-auto">
@@ -58,3 +44,5 @@ export default function TopBar({
     </header>
   );
 }
+
+export default memo(TopBarImpl);

@@ -1,5 +1,6 @@
 "use client";
 
+import { memo } from "react";
 import type { Conversation } from "@/lib/types";
 import HistoryList from "./HistoryList";
 import {
@@ -32,7 +33,7 @@ interface Props {
 const iconBtn =
   "flex h-9 w-9 items-center justify-center rounded-lg text-ink-faint transition-colors hover:bg-white/[0.06] hover:text-ink-soft";
 
-export default function Sidebar({
+function SidebarImpl({
   conversations,
   activeId,
   query,
@@ -202,3 +203,6 @@ export default function Sidebar({
     </>
   );
 }
+
+export default memo(SidebarImpl);
+

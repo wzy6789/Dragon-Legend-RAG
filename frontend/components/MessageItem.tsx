@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { memo, useEffect, useState } from "react";
 import { Markdown } from "@/lib/markdown";
 import type { ChatMessage } from "@/lib/types";
 import SourceDrawer from "./SourceDrawer";
@@ -8,8 +8,19 @@ import { CheckIcon, CopyIcon, RefreshIcon } from "./icons";
 
 const TIER_LABEL: Record<string, string> = { flash: "Flash", pro: "Pro" };
 
-function StatusText({ tier }: { tier?: "flash" | "pro" }) {
+/** 生成中状态：Pro 与 Flash 各一句自然描述，并显示已等待秒数 */
+function StatusText({ tier, startedAt }: { tier?: "flash" | "pro"; startedAt: number }) {
+  const [elapsed, setElapsed] = useState(0);
+
+  useEffect(() => {
+    const tick = () => setElapsed(Math.max(0, Math.floor((Date.now() - startedAt) / 1000)));
+    tick();
+    const timer = window.setInterval(tick, 1000);
+    return () => window.clearInterval(timer);
+  }, [startedAt]);
+
   const label = tier === "pro" ? "正在检索、核验并组织证据…" : "正在回答…";
+
   return (
     <div className="flex items-center gap-2 py-0.5 text-[13px] text-ink-muted">
       <span className="flex items-center gap-1">
@@ -22,6 +33,7 @@ function StatusText({ tier }: { tier?: "flash" | "pro" }) {
         ))}
       </span>
       <span>{label}</span>
+      {elapsed >= 2 ? <span className="text-[11.5px] text-ink-faint">{elapsed}s</span> : null}
     </div>
   );
 }
@@ -31,7 +43,7 @@ interface Props {
   onRegenerate?: (messageId: string) => void;
 }
 
-export default function MessageItem({ message, onRegenerate }: Props) {
+function MessageItemImpl({ message, onRegenerate }: Props) {
   const [copied, setCopied] = useState(false);
 
   if (message.role === "user") {
@@ -65,7 +77,9 @@ export default function MessageItem({ message, onRegenerate }: Props) {
         </div>
       ) : null}
 
-      {streaming && !hasContent ? <StatusText tier={message.tier} /> : null}
+      {streaming && !hasContent ? (
+        <StatusText tier={message.tier} startedAt={message.createdAt} />
+      ) : null}
 
       {hasContent ? (
         <div className="relative">
@@ -86,7 +100,6 @@ export default function MessageItem({ message, onRegenerate }: Props) {
         </p>
       ) : null}
 
-      {/* 悬停轻量操作：复制 / 重新生成 */}
       {!streaming && hasContent ? (
         <div className="mt-1.5 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
           <button
@@ -120,3 +133,16 @@ export default function MessageItem({ message, onRegenerate }: Props) {
     </div>
   );
 }
+
+/** 已完成的回答不随流式 token 重绘 */
+export default memo(MessageItemImpl, (prev, next) => {
+  if (prev.message === next.message && prev.onRegenerate === next.onRegenerate) return true;
+  const a = prev.message;
+  const b = next.message;
+  return (
+    a.content === b.content &&
+    a.status === b.status &&
+    a.sources === b.sources &&
+    a.error === b.error
+  );
+});
