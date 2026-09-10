@@ -100,16 +100,17 @@ Railway / Render 均可直接识别根 `backend/Dockerfile`：
 - **Render**：New Web Service → Root Directory = `backend`，Runtime = Docker；设置环境变量；可挂载 Disk 存放语料。
 - 部署后把公网域名填到前端 `NEXT_PUBLIC_API_URL`，并在后端 `CORS_ORIGINS` 加入前端域名（如 `https://*.vercel.app`）。
 
-#### Render 一键入口
+#### Render 一键入口（免费在线演示）
 
-仓库根目录的 `render.yaml` 已预设 Docker 服务、健康检查和私有数据盘。登录 Render 后选择 **New + → Blueprint** 并连接本仓库；只需在创建页填写 `LLM_API_KEY`。服务创建后：
+仓库根目录的 `render.yaml` 已预设 Render 免费 Web Service、Docker 服务与健康检查。登录 Render 后选择 **New + → Blueprint** 并连接本仓库；只需在创建页填写 `LLM_API_KEY`。服务创建后：
 
-1. 在 Render 的 Shell / Disk 中把你自己拥有的 `corpus.jsonl` 上传到 `/mnt/rag-data/corpus.jsonl`；
-2. 复制服务的 `https://...onrender.com` 地址；
-3. 在 GitHub 仓库 `Settings → Secrets and variables → Actions → Variables` 新增 `NEXT_PUBLIC_API_URL`，值为该地址；
-4. 在 Actions 手动重跑 **Deploy frontend to GitHub Pages**。
+1. 复制服务的 `https://...onrender.com` 地址；
+2. 在 GitHub 仓库 `Settings → Secrets and variables → Actions → Variables` 新增 `NEXT_PUBLIC_API_URL`，值为该地址；
+3. 在 Actions 手动重跑 **Deploy frontend to GitHub Pages**。
 
 默认跨域已允许 `https://wzy6789.github.io`，无需为 GitHub Pages 额外设置 CORS。
+
+> 免费服务会在闲置后休眠，首次请求可能需要等待唤醒；其临时文件系统不能安全保存私有语料，因而本配置只用于在线模型问答演示。完整私有 RAG 应继续在本地运行，或使用带持久磁盘的托管方案。
 
 ---
 
