@@ -23,6 +23,9 @@ export default function ChatInterface() {
   const [activeStage, setActiveStage] = useState<string | null>(null);
   const [status, setStatus] = useState<string>("");
   const [uploadHint, setUploadHint] = useState<string>("");
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [accessPassword, setAccessPassword] = useState("");
+  const [llmApiKey, setLlmApiKey] = useState("");
   const abortRef = useRef<AbortController | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
@@ -68,7 +71,7 @@ export default function ChatInterface() {
 
     try {
       await streamChat(
-        { message: text, tier, conversationId, signal: ac.signal },
+        { message: text, tier, conversationId, accessPassword, llmApiKey, signal: ac.signal },
         {
           onStage: (stage) => {
             setActiveStage(stage);
@@ -144,6 +147,12 @@ export default function ChatInterface() {
         </div>
         <div className="flex items-center gap-1.5">
           <button
+            onClick={() => setSettingsOpen((open) => !open)}
+            className="rounded-md px-2.5 py-1 text-xs text-mist-400 transition-colors hover:bg-ink-800 hover:text-mist-100"
+          >
+            连接设置
+          </button>
+          <button
             onClick={() => fileRef.current?.click()}
             className="rounded-md px-2.5 py-1 text-xs text-mist-400 transition-colors hover:bg-ink-800 hover:text-mist-100"
           >
@@ -165,6 +174,16 @@ export default function ChatInterface() {
           />
         </div>
       </header>
+
+      {settingsOpen && (
+        <section className="mt-3 rounded-xl border border-ink-700 bg-ink-850/80 p-3 text-sm">
+          <p className="mb-2 text-xs text-mist-400">访问密码用于保护题库；自己的 API Key 可选，仅保留在当前页面内存中。</p>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <input value={accessPassword} onChange={(e) => setAccessPassword(e.target.value)} type="password" placeholder="完整 RAG 访问密码" className="rounded-md border border-ink-700 bg-ink-900 px-2.5 py-2 text-sm text-mist-100 placeholder:text-mist-600 focus:border-brass-500/50 focus:outline-none" />
+            <input value={llmApiKey} onChange={(e) => setLlmApiKey(e.target.value)} type="password" placeholder="自己的 DeepSeek API Key（可选）" className="rounded-md border border-ink-700 bg-ink-900 px-2.5 py-2 text-sm text-mist-100 placeholder:text-mist-600 focus:border-brass-500/50 focus:outline-none" />
+          </div>
+        </section>
+      )}
 
       {/* 消息区 */}
       <main className="flex-1 space-y-4 overflow-y-auto py-5">

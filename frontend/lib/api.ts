@@ -4,6 +4,8 @@ export interface ChatRequestOptions {
   message: string;
   tier: Tier;
   conversationId?: string;
+  accessPassword?: string;
+  llmApiKey?: string;
   signal?: AbortSignal;
 }
 
@@ -27,7 +29,11 @@ export async function streamChat(
 ): Promise<void> {
   const res = await fetch(`${API_BASE}/api/chat`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      ...(opts.accessPassword ? { "X-RAG-Access-Key": opts.accessPassword } : {}),
+      ...(opts.llmApiKey ? { "X-LLM-API-Key": opts.llmApiKey } : {}),
+    },
     body: JSON.stringify({
       message: opts.message,
       tier: opts.tier,
