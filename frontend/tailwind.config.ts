@@ -9,28 +9,23 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        // 深色墨蓝（背景分层）
+        // 页面底色与面板（干净深色，不做渐变堆叠）
+        base: "#0D0F12",
+        panel: "#15181D",
+        panelAlt: "#1A1E24",
+        // 文字
         ink: {
-          950: "#0a0f1a",
-          900: "#0e1524",
-          850: "#121a2c",
-          800: "#172033",
-          700: "#1f2b42",
+          DEFAULT: "#F1F3F5",
+          soft: "#C7CCD3",
+          muted: "#9AA1AA",
+          faint: "#7C838C",
         },
-        // 暖灰（正文/次要文字）
-        mist: {
-          50: "#f5f6f8",
-          100: "#e6e9ee",
-          300: "#b6becb",
-          400: "#98a2b3",
-          500: "#7c8798",
-        },
-        // 低饱和金（点缀）
-        brass: {
-          300: "#d9c39a",
-          400: "#c9ab77",
-          500: "#b3925c",
-          600: "#9a7c4c",
+        // 低饱和金（仅品牌强调）
+        gold: {
+          300: "#E0C766",
+          400: "#D9B84A",
+          500: "#C9A227",
+          600: "#A8871F",
         },
       },
       fontFamily: {
@@ -41,9 +36,35 @@ const config: Config = {
           '"PingFang SC"',
           '"Hiragino Sans GB"',
           '"Microsoft YaHei"',
+          '"Source Han Sans SC"',
           "sans-serif",
         ],
-        serif: ['"Noto Serif SC"', '"Songti SC"', "SimSun", "serif"],
+        serif: [
+          '"Noto Serif SC"',
+          '"Source Han Serif SC"',
+          '"Songti SC"',
+          "SimSun",
+          "Georgia",
+          "serif",
+        ],
+      },
+      maxWidth: {
+        thread: "768px",
+        composer: "840px",
+      },
+      keyframes: {
+        "fade-in": {
+          from: { opacity: "0", transform: "translateY(4px)" },
+          to: { opacity: "1", transform: "translateY(0)" },
+        },
+        "dot-pulse": {
+          "0%, 80%, 100%": { opacity: "0.25" },
+          "40%": { opacity: "1" },
+        },
+      },
+      animation: {
+        "fade-in": "fade-in 220ms ease-out both",
+        "dot-pulse": "dot-pulse 1.4s ease-in-out infinite",
       },
     },
   },

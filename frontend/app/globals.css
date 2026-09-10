@@ -12,26 +12,123 @@ body {
 }
 
 body {
-  @apply bg-ink-950 text-mist-100 antialiased;
-  background-image:
-    radial-gradient(1200px 500px at 78% -8%, rgba(185, 146, 92, 0.05), transparent 60%),
-    radial-gradient(900px 420px at 12% 108%, rgba(61, 91, 128, 0.08), transparent 55%);
-  background-attachment: fixed;
+  background-color: #0d0f12;
+  color: #f1f3f5;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
-/* 极细滚动条，克制观感 */
+/* 极细滚动条，保持干净 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.14) transparent;
+}
 *::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 10px;
+  height: 10px;
 }
 *::-webkit-scrollbar-thumb {
-  background: rgba(152, 162, 179, 0.18);
-  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.12);
+  border: 3px solid transparent;
+  background-clip: content-box;
+  border-radius: 9999px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+  background-clip: content-box;
 }
 *::-webkit-scrollbar-track {
   background: transparent;
 }
 
 ::selection {
-  background: rgba(201, 171, 119, 0.25);
+  background: rgba(201, 162, 39, 0.28);
+}
+
+@layer utilities {
+  /* 回答正文排版（Markdown 容器） */
+  .prose-thread {
+    font-size: 15px;
+    line-height: 1.75;
+    color: #eceff2;
+    word-break: break-word;
+  }
+  .prose-thread > * + * {
+    margin-top: 0.85em;
+  }
+  .prose-thread h1,
+  .prose-thread h2,
+  .prose-thread h3,
+  .prose-thread h4 {
+    font-weight: 600;
+    line-height: 1.45;
+    color: #f1f3f5;
+  }
+  .prose-thread h1 {
+    font-size: 1.2rem;
+  }
+  .prose-thread h2 {
+    font-size: 1.08rem;
+  }
+  .prose-thread h3,
+  .prose-thread h4 {
+    font-size: 1rem;
+  }
+  .prose-thread ul,
+  .prose-thread ol {
+    padding-left: 1.25rem;
+  }
+  .prose-thread ul {
+    list-style: disc;
+  }
+  .prose-thread ol {
+    list-style: decimal;
+  }
+  .prose-thread li + li {
+    margin-top: 0.3em;
+  }
+  .prose-thread li::marker {
+    color: rgba(201, 162, 39, 0.75);
+  }
+  .prose-thread strong {
+    color: #ffffff;
+    font-weight: 600;
+  }
+  .prose-thread em {
+    font-style: italic;
+    color: #e6e9ec;
+  }
+  .prose-thread code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.875em;
+    padding: 0.1em 0.36em;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.06);
+    color: #e8dcb4;
+  }
+  .prose-thread pre {
+    overflow-x: auto;
+    padding: 0.85rem 1rem;
+    border-radius: 12px;
+    background: #15181d;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+  }
+  .prose-thread pre code {
+    background: transparent;
+    padding: 0;
+    color: #dfe3e8;
+  }
+  .prose-thread blockquote {
+    border-left: 2px solid rgba(201, 162, 39, 0.45);
+    padding-left: 0.9rem;
+    color: #c7ccd3;
+  }
+  .prose-thread hr {
+    border-color: rgba(255, 255, 255, 0.08);
+  }
+  .prose-thread a {
+    color: #d9b84a;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
 }

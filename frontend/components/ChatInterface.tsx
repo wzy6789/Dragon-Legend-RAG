@@ -1,17 +1,17 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import SourceList from "./SourceList";
-import TierSwitch from "./TierSwitch";
-import type { ChatMessage, SourceItem, StageName, Tier } from "@/lib/types";
-import { clearConversation, streamChat, uploadFile } from "@/lib/api";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { clearConversation, streamChat } from "@/lib/api";
+import type { ChatMessage, SessionCredentials, Tier } from "@/lib/types";
+import AppHeader from "./AppHeader";
+import Composer from "./Composer";
+import MessageItem from "./MessageItem";
+import SettingsDialog from "./SettingsDialog";
+import WelcomeScreen from "./WelcomeScreen";
 
-const PRO_STAGES = ["拆解问题", "检索章节", "核验证据", "组织回答"];
-
-function newId() {
-  return typeof crypto !== "undefined" && "randomUUID" in crypto
-    ? crypto.randomUUID()
-    : Math.random().toString(36).slice(2);
+function newId(): string {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
+  return Math.random().toString(36).slice(2);
 }
 
 export default function ChatInterface() {
@@ -19,328 +19,178 @@ export default function ChatInterface() {
   const [input, setInput] = useState("");
   const [tier, setTier] = useState<Tier>("flash");
   const [busy, setBusy] = useState(false);
-  const [conversationId, setConversationId] = useState<string>("");
-  const [activeStage, setActiveStage] = useState<string | null>(null);
-  const [status, setStatus] = useState<string>("");
-  const [uploadHint, setUploadHint] = useState<string>("");
+  const [conversationId, setConversationId] = useState("");
+  const [connected, setConnected] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [accessPassword, setAccessPassword] = useState("");
-  const [llmApiKey, setLlmApiKey] = useState("");
+  // 凭据仅存在于 React 内存：不写入 localStorage / sessionStorage / URL
+  const [creds, setCreds] = useState<SessionCredentials>({
+    accessKey: "",
+    llmApiKey: "",
+  });
+
   const abortRef = useRef<AbortController | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
-  const fileRef = useRef<HTMLInputElement | null>(null);
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  const stickToBottomRef = useRef(true);
+
+  // 滚动跟随：仅在用户停留在底部附近时自动滚动
+  useEffect(() => {
+    if (!stickToBottomRef.current) return;
+    bottomRef.current?.scrollIntoView({ block: "end" });
+  }, [messages]);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, activeStage, status]);
+    const onScroll = () => {
+      const scroller = document.scrollingElement ?? document.documentElement;
+      const remaining = scroller.scrollHeight - scroller.scrollTop - window.innerHeight;
+      stickToBottomRef.current = remaining < 120;
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
 
-  const patchAssistant = (id: string, patch: Partial<ChatMessage>) => {
+  const patch = useCallback((id: string, next: Partial<ChatMessage>) => {
+    setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, ...next } : m)));
+  }, []);
+
+  const appendToken = useCallback((id: string, text: string) => {
     setMessages((prev) =>
-      prev.map((m) => (m.id === id ? { ...m, ...patch } : m)),
+      prev.map((m) => (m.id === id ? { ...m, content: m.content + text } : m)),
     );
-  };
+  }, []);
 
-  const appendToken = (id: string, tok: string) => {
-    setMessages((prev) =>
-      prev.map((m) => (m.id === id ? { ...m, content: m.content + tok } : m)),
-    );
-  };
+  const stop = useCallback(() => {
+    abortRef.current?.abort();
+    abortRef.current = null;
+    setBusy(false);
+  }, []);
 
-  async function send() {
+  const send = useCallback(async () => {
     const text = input.trim();
     if (!text || busy) return;
 
     const assistantId = newId();
-    const userMsg: ChatMessage = { id: newId(), role: "user", content: text };
-    const assistantMsg: ChatMessage = {
-      id: assistantId,
-      role: "assistant",
-      content: "",
-      tier,
-      stages: tier === "pro" ? [] : undefined,
-      sources: [],
-    };
-    setMessages((prev) => [...prev, userMsg, assistantMsg]);
+    setMessages((prev) => [
+      ...prev,
+      { id: newId(), role: "user", content: text },
+      {
+        id: assistantId,
+        role: "assistant",
+        content: "",
+        tier,
+        sources: [],
+        status: "streaming",
+      },
+    ]);
     setInput("");
     setBusy(true);
-    setStatus("连接…");
-    setActiveStage(null);
+    stickToBottomRef.current = true;
 
-    const ac = new AbortController();
-    abortRef.current = ac;
+    const controller = new AbortController();
+    abortRef.current = controller;
 
     try {
       await streamChat(
-        { message: text, tier, conversationId, accessPassword, llmApiKey, signal: ac.signal },
         {
-          onStage: (stage) => {
-            setActiveStage(stage);
-            setStatus("");
-            if (tier === "pro") {
-              const reached = PRO_STAGES.slice(0, PRO_STAGES.indexOf(stage) + 1) as StageName[];
-              patchAssistant(assistantId, { stages: reached });
-            }
-          },
-          onToken: (tok) => {
-            appendToken(assistantId, tok);
-            setStatus("");
-          },
-          onSources: (sources) => {
-            patchAssistant(assistantId, { sources });
-          },
+          message: text,
+          tier,
+          conversationId: conversationId || undefined,
+          accessKey: creds.accessKey || undefined,
+          llmApiKey: creds.llmApiKey || undefined,
+          signal: controller.signal,
+        },
+        {
+          onToken: (t) => appendToken(assistantId, t),
+          onSources: (sources) => patch(assistantId, { sources }),
           onDone: (cid) => {
-            setConversationId(cid || conversationId);
-            patchAssistant(assistantId, { done: true });
-            setBusy(false);
-            setStatus("");
-            setActiveStage(null);
+            if (cid) setConversationId(cid);
+            patch(assistantId, { status: "done" });
+            setConnected(true);
           },
-          onError: (msg) => {
-            patchAssistant(assistantId, { error: msg, done: true });
-            setBusy(false);
-            setStatus("");
-            setActiveStage(null);
+          onError: (message) => {
+            patch(assistantId, { status: "error", error: message });
+            setConnected(false);
           },
         },
       );
     } catch (e) {
-      const err = e instanceof Error ? e.message : "未知错误";
       if (e instanceof DOMException && e.name === "AbortError") {
-        patchAssistant(assistantId, { error: "已停止", done: true });
+        patch(assistantId, { status: "stopped" });
       } else {
-        patchAssistant(assistantId, { error: err, done: true });
+        patch(assistantId, { status: "error", error: "生成中断，请重试。" });
+        setConnected(false);
       }
-      setBusy(false);
-      setStatus("");
-      setActiveStage(null);
     } finally {
       abortRef.current = null;
+      setBusy(false);
+      window.setTimeout(() => inputRef.current?.focus(), 20);
     }
-  }
+  }, [appendToken, busy, conversationId, creds, input, patch, tier]);
 
-  async function handleClear() {
-    if (conversationId) await clearConversation(conversationId);
+  const newChat = useCallback(() => {
+    abortRef.current?.abort();
+    abortRef.current = null;
+    setBusy(false);
+    if (conversationId) {
+      void clearConversation(
+        conversationId,
+        creds.accessKey || undefined,
+        creds.llmApiKey || undefined,
+      );
+    }
     setMessages([]);
     setConversationId("");
-    setActiveStage(null);
-    setStatus("");
-  }
-
-  async function handleFile(file: File | undefined) {
-    if (!file) return;
-    setUploadHint("上传中…");
-    const res = await uploadFile(file);
-    setUploadHint(res.message);
-    setTimeout(() => setUploadHint(""), 4000);
-    if (fileRef.current) fileRef.current.value = "";
-  }
-
-  const showStages = tier === "pro";
+    setInput("");
+    window.setTimeout(() => inputRef.current?.focus(), 20);
+  }, [conversationId, creds]);
 
   return (
-    <div className="mx-auto flex h-screen w-full max-w-3xl flex-col px-4 sm:px-6">
-      {/* 头部 */}
-      <header className="flex items-center justify-between border-b border-ink-800/80 py-3">
-        <div className="flex items-baseline gap-2">
-          <h1 className="font-serif text-lg tracking-wide text-mist-100">龙王传说</h1>
-          <span className="text-xs text-brass-500">考据问答</span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <button
-            onClick={() => setSettingsOpen((open) => !open)}
-            className="rounded-md px-2.5 py-1 text-xs text-mist-400 transition-colors hover:bg-ink-800 hover:text-mist-100"
-          >
-            连接设置
-          </button>
-          <button
-            onClick={() => fileRef.current?.click()}
-            className="rounded-md px-2.5 py-1 text-xs text-mist-400 transition-colors hover:bg-ink-800 hover:text-mist-100"
-          >
-            补充资料
-          </button>
-          <button
-            onClick={handleClear}
-            disabled={messages.length === 0}
-            className="rounded-md px-2.5 py-1 text-xs text-mist-400 transition-colors hover:bg-ink-800 hover:text-mist-100 disabled:opacity-30"
-          >
-            清除对话
-          </button>
-          <input
-            ref={fileRef}
-            type="file"
-            accept=".txt,.md,.pdf"
-            className="hidden"
-            onChange={(e) => handleFile(e.target.files?.[0])}
-          />
-        </div>
-      </header>
+    <div className="flex min-h-dvh flex-col bg-base">
+      <AppHeader
+        connected={connected}
+        busy={busy}
+        onNewChat={newChat}
+        onOpenSettings={() => setSettingsOpen(true)}
+      />
 
-      {settingsOpen && (
-        <section className="mt-3 rounded-xl border border-ink-700 bg-ink-850/80 p-3 text-sm">
-          <p className="mb-2 text-xs text-mist-400">访问密码用于保护题库；自己的 API Key 可选，仅保留在当前页面内存中。</p>
-          <div className="grid gap-2 sm:grid-cols-2">
-            <input value={accessPassword} onChange={(e) => setAccessPassword(e.target.value)} type="password" placeholder="完整 RAG 访问密码" className="rounded-md border border-ink-700 bg-ink-900 px-2.5 py-2 text-sm text-mist-100 placeholder:text-mist-600 focus:border-brass-500/50 focus:outline-none" />
-            <input value={llmApiKey} onChange={(e) => setLlmApiKey(e.target.value)} type="password" placeholder="自己的 DeepSeek API Key（可选）" className="rounded-md border border-ink-700 bg-ink-900 px-2.5 py-2 text-sm text-mist-100 placeholder:text-mist-600 focus:border-brass-500/50 focus:outline-none" />
-          </div>
-        </section>
-      )}
-
-      {/* 消息区 */}
-      <main className="flex-1 space-y-4 overflow-y-auto py-5">
+      <main className="flex-1">
         {messages.length === 0 ? (
-          <div className="flex h-full flex-col items-center justify-center gap-3 text-center">
-            <p className="font-serif text-2xl text-mist-300">关于《龙王传说》的任何问题</p>
-            <p className="max-w-md text-sm leading-6 text-mist-500">
-              选择 Flash 快速作答，或 Pro 进行拆解检索与证据核验。所有回答都将标注参考来源。
-            </p>
-          </div>
+          <WelcomeScreen
+            onPick={(text) => {
+              setInput(text);
+              window.setTimeout(() => inputRef.current?.focus(), 20);
+            }}
+          />
         ) : (
-          messages.map((m) => <MessageRow key={m.id} message={m} />)
-        )}
-
-        {/* 进行中的辅助行 */}
-        {busy && (
-          <div className="flex items-center gap-2 px-1 text-xs text-mist-500">
-            {showStages && activeStage ? (
-              <>
-                <StageDots current={activeStage} />
-                <span className="text-brass-400">{activeStage}</span>
-              </>
-            ) : (
-              <>
-                <Spinner />
-                <span>{status || "生成中…"}</span>
-              </>
-            )}
+          <div className="mx-auto w-full max-w-thread space-y-6 px-4 py-6 sm:px-6 sm:py-8">
+            {messages.map((m) => (
+              <MessageItem key={m.id} message={m} />
+            ))}
+            <div ref={bottomRef} />
           </div>
         )}
-        {uploadHint && (
-          <div className="px-1 text-xs text-brass-400">{uploadHint}</div>
-        )}
-        <div ref={bottomRef} />
       </main>
 
-      {/* 输入区 */}
-      <footer className="border-t border-ink-800/80 pb-4 pt-3">
-        <div className="mb-2 flex items-center justify-between">
-          <TierSwitch value={tier} onChange={setTier} disabled={busy} />
-          <span className="hidden text-[11px] text-mist-500 sm:inline">
-            {tier === "flash" ? "快速直答" : "拆解 · 检索 · 核验 · 组织"}
-          </span>
-        </div>
-        <div className="flex items-end gap-2 rounded-xl border border-ink-700 bg-ink-850/80 p-2 focus-within:border-brass-500/40">
-          <textarea
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                void send();
-              }
-            }}
-            rows={1}
-            placeholder="输入问题…（Enter 发送，Shift+Enter 换行）"
-            className="max-h-40 flex-1 resize-none bg-transparent px-1 py-1.5 text-sm leading-6 text-mist-100 placeholder:text-mist-500 focus:outline-none"
-          />
-          <button
-            onClick={() => void send()}
-            disabled={busy || !input.trim()}
-            className="shrink-0 rounded-lg bg-brass-500/15 px-4 py-2 text-sm text-brass-300 transition-colors hover:bg-brass-500/25 disabled:opacity-30"
-          >
-            发送
-          </button>
-        </div>
-      </footer>
-    </div>
-  );
-}
-
-/* ---------- 子组件 ---------- */
-
-function MessageRow({ message }: { message: ChatMessage }) {
-  const [open, setOpen] = useState(false);
-
-  if (message.role === "user") {
-    return (
-      <div className="flex justify-end">
-        <div className="max-w-[85%] rounded-xl rounded-br-sm bg-ink-800/90 px-3.5 py-2.5 text-sm leading-6 text-mist-100">
-          {message.content}
-        </div>
-      </div>
-    );
-  }
-
-  const streaming = !message.done;
-  const hasSources = (message.sources?.length ?? 0) > 0;
-
-  return (
-    <div className="flex flex-col gap-1.5">
-      <div className="flex items-center gap-2">
-        <span className="text-xs font-medium text-brass-500">
-          {message.tier === "pro" ? "Pro" : "Flash"}
-        </span>
-        {message.stages && message.stages.length > 0 && (
-          <span className="text-[11px] text-mist-500">{message.stages.join(" · ")}</span>
-        )}
-      </div>
-
-      <div className="rounded-xl rounded-tl-sm border border-ink-800 bg-ink-900/60 px-3.5 py-2.5 text-sm leading-6 text-mist-100">
-        {message.error ? (
-          <p className="text-red-300/90">⚠ {message.error}</p>
-        ) : message.content ? (
-          <p className="whitespace-pre-wrap">{message.content}</p>
-        ) : (
-          <span className="text-mist-500">{streaming ? "…" : "（空）"}</span>
-        )}
-        {streaming && <Cursor />}
-      </div>
-
-      {hasSources && (
-        <div className="pt-0.5">
-          <button
-            onClick={() => setOpen((v) => !v)}
-            className="text-[11px] text-mist-500 underline-offset-2 hover:text-mist-300 hover:underline"
-          >
-            {open ? "收起参考来源" : `参考来源（${message.sources?.length}）`}
-          </button>
-          {open && (
-            <div className="mt-2">
-              <SourceList sources={message.sources ?? []} />
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function StageDots({ current }: { current: string }) {
-  const idx = PRO_STAGES.indexOf(current);
-  return (
-    <span className="flex items-center gap-1">
-      {PRO_STAGES.map((s, i) => (
-        <span
-          key={s}
-          className={
-            "h-1.5 w-1.5 rounded-full " +
-            (i < idx
-              ? "bg-brass-500"
-              : i === idx
-                ? "animate-pulse bg-brass-400"
-                : "bg-ink-700")
-          }
+      <div className="sticky bottom-0 mt-auto bg-base/95 backdrop-blur">
+        <Composer
+          value={input}
+          onChange={setInput}
+          tier={tier}
+          onTierChange={setTier}
+          onSend={() => void send()}
+          onStop={stop}
+          busy={busy}
+          inputRef={inputRef}
         />
-      ))}
-    </span>
-  );
-}
+      </div>
 
-function Spinner() {
-  return (
-    <span className="h-3 w-3 animate-spin rounded-full border border-brass-500/40 border-t-brass-400" />
+      <SettingsDialog
+        open={settingsOpen}
+        accessKey={creds.accessKey}
+        llmApiKey={creds.llmApiKey}
+        onSave={setCreds}
+        onClose={() => setSettingsOpen(false)}
+      />
+    </div>
   );
-}
-
-function Cursor() {
-  return <span className="ml-0.5 inline-block h-3.5 w-[2px] animate-pulse bg-brass-400 align-middle" />;
 }
