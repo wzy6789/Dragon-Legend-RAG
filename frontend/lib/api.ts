@@ -1,4 +1,4 @@
-import type { SourceItem, Tier } from "./types";
+import type { ApiError, ApiErrorKind, SourceItem, Tier } from "./types";
 
 /** 构建时注入；不要硬编码或替换该地址 */
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
@@ -16,8 +16,18 @@ export interface StreamHandlers {
   onToken?: (text: string) => void;
   onSources?: (sources: SourceItem[]) => void;
   onDone?: (conversationId: string) => void;
-  onError?: (message: string) => void;
+  onError?: (error: ApiError) => void;
 }
+
+/** 面向用户的错误文案（按类型归一化） */
+export const ERROR_TEXT: Record<ApiErrorKind, string> = {
+  auth: "访问密码错误",
+  rate: "请求过于频繁，请稍后重试",
+  model: "API Key 无效、额度不足或模型服务不可用",
+  network: "无法连接知识库服务，请检查网络后重试",
+  server: "知识库服务暂时不可用，请稍后重试",
+  unknown: "请求失败，请稍后重试",
+};
 
 function authHeaders(accessKey?: string, llmApiKey?: string): Record<string, string> {
   const headers: Record<string, string> = {};
@@ -26,12 +36,26 @@ function authHeaders(accessKey?: string, llmApiKey?: string): Record<string, str
   return headers;
 }
 
-function friendlyError(status: number, body: string): string {
-  if (status === 401 || status === 403) return "访问密码无效或已过期，请在右上角「设置」中检查。";
-  if (status === 429) return "请求过于频繁，请稍后重试。";
-  if (status >= 500) return "知识库服务暂时不可用，请稍后重试。";
-  const tail = body ? `：${body.slice(0, 160)}` : "";
-  return `请求失败（${status}）${tail}`;
+function classifyStatus(status: number): ApiErrorKind {
+  if (status === 401 || status === 403) return "auth";
+  if (status === 429) return "rate";
+  if (status === 400 || status === 402 || status === 422) return "model";
+  if (status >= 500) return "server";
+  return "unknown";
+}
+
+/** 对纯文本错误信息做归类（用于 SSE error 事件） */
+export function classifyText(text: string): ApiErrorKind {
+  const t = text.toLowerCase();
+  if (/401|403|unauthor|forbidden|访问密码|密码|access.?key/.test(t)) return "auth";
+  if (/429|too many|rate.?limit|频繁/.test(t)) return "rate";
+  if (/api.?key|额度|quota|insufficient|balance|invalid.?key|模型|model|deepseek/.test(t)) return "model";
+  if (/timeout|timed out|network|fetch|connect|连接/.test(t)) return "network";
+  return "server";
+}
+
+function toError(kind: ApiErrorKind): ApiError {
+  return { kind, message: ERROR_TEXT[kind] };
 }
 
 /**
@@ -59,17 +83,16 @@ export async function streamChat(
     });
   } catch (e) {
     if (e instanceof DOMException && e.name === "AbortError") throw e;
-    handlers.onError?.("无法连接知识库服务，请确认网络后重试。");
+    handlers.onError?.(toError("network"));
     return;
   }
 
   if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    handlers.onError?.(friendlyError(res.status, text));
+    handlers.onError?.(toError(classifyStatus(res.status)));
     return;
   }
   if (!res.body) {
-    handlers.onError?.("响应无流式内容。");
+    handlers.onError?.(toError("server"));
     return;
   }
 
@@ -102,10 +125,10 @@ export async function streamChat(
         handlers.onDone?.(String(payload.conversation_id ?? ""));
         break;
       case "error":
-        handlers.onError?.(String(payload.message ?? "服务返回错误。"));
+        handlers.onError?.(toError(classifyText(String(payload.message ?? ""))));
         break;
       default:
-        break; // stage 等中间事件不再展示
+        break; // stage 等中间事件不展示
     }
   };
 
@@ -122,7 +145,7 @@ export async function streamChat(
   if (buffer.trim()) dispatch(buffer);
 }
 
-/** 清除后端会话历史（失败静默，不影响前端新对话） */
+/** 清除后端会话历史（新对话时调用；失败静默） */
 export async function clearConversation(
   conversationId: string,
   accessKey?: string,

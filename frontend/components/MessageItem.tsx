@@ -1,13 +1,17 @@
 "use client";
 
+import { useState } from "react";
 import { Markdown } from "@/lib/markdown";
 import type { ChatMessage } from "@/lib/types";
 import SourceDrawer from "./SourceDrawer";
+import { CheckIcon, CopyIcon, RefreshIcon } from "./icons";
+
+const TIER_LABEL: Record<string, string> = { flash: "Flash", pro: "Pro" };
 
 function StatusText({ tier }: { tier?: "flash" | "pro" }) {
-  const label = tier === "pro" ? "正在检索与核验证据…" : "正在回答…";
+  const label = tier === "pro" ? "正在检索、核验并组织证据…" : "正在回答…";
   return (
-    <div className="flex items-center gap-2 py-1 text-[13px] text-ink-muted">
+    <div className="flex items-center gap-2 py-0.5 text-[13px] text-ink-muted">
       <span className="flex items-center gap-1">
         {[0, 1, 2].map((i) => (
           <span
@@ -22,11 +26,18 @@ function StatusText({ tier }: { tier?: "flash" | "pro" }) {
   );
 }
 
-export default function MessageItem({ message }: { message: ChatMessage }) {
+interface Props {
+  message: ChatMessage;
+  onRegenerate?: (messageId: string) => void;
+}
+
+export default function MessageItem({ message, onRegenerate }: Props) {
+  const [copied, setCopied] = useState(false);
+
   if (message.role === "user") {
     return (
       <div className="flex animate-fade-in justify-end">
-        <div className="max-w-[72%] whitespace-pre-wrap rounded-2xl rounded-br-md bg-panelAlt px-4 py-2.5 text-[14px] leading-6 text-ink">
+        <div className="max-w-[70%] whitespace-pre-wrap rounded-[14px] rounded-br-md bg-[#1C2027] px-3.5 py-2.5 text-[14px] leading-6 text-ink">
           {message.content}
         </div>
       </div>
@@ -36,8 +47,24 @@ export default function MessageItem({ message }: { message: ChatMessage }) {
   const streaming = message.status === "streaming";
   const hasContent = message.content.trim().length > 0;
 
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(message.content);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1600);
+    } catch {
+      /* 剪贴板不可用时静默 */
+    }
+  };
+
   return (
-    <div className="animate-fade-in">
+    <div className="group animate-fade-in">
+      {message.tier ? (
+        <div className="mb-1 text-[11px] font-medium tracking-wide text-ink-faint">
+          {TIER_LABEL[message.tier] ?? message.tier}
+        </div>
+      ) : null}
+
       {streaming && !hasContent ? <StatusText tier={message.tier} /> : null}
 
       {hasContent ? (
@@ -54,9 +81,37 @@ export default function MessageItem({ message }: { message: ChatMessage }) {
       ) : null}
 
       {message.status === "error" ? (
-        <p className="mt-1 rounded-xl border border-red-500/20 bg-red-500/[0.06] px-3 py-2 text-[12.5px] leading-5 text-red-200/90">
+        <p className="mt-1.5 rounded-[10px] border border-red-500/25 bg-red-500/[0.07] px-3 py-2 text-[12.5px] leading-5 text-red-200/90">
           {message.error || "生成失败，请重试。"}
         </p>
+      ) : null}
+
+      {/* 悬停轻量操作：复制 / 重新生成 */}
+      {!streaming && hasContent ? (
+        <div className="mt-1.5 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+          <button
+            type="button"
+            onClick={() => void copy()}
+            aria-label="复制回答"
+            title={copied ? "已复制" : "复制"}
+            className="flex items-center gap-1 rounded-lg px-1.5 py-1 text-[11.5px] text-ink-faint transition-colors hover:bg-white/[0.06] hover:text-ink-soft"
+          >
+            {copied ? <CheckIcon className="h-3.5 w-3.5" /> : <CopyIcon className="h-3.5 w-3.5" />}
+            <span>{copied ? "已复制" : "复制"}</span>
+          </button>
+          {onRegenerate ? (
+            <button
+              type="button"
+              onClick={() => onRegenerate(message.id)}
+              aria-label="重新生成"
+              title="重新生成"
+              className="flex items-center gap-1 rounded-lg px-1.5 py-1 text-[11.5px] text-ink-faint transition-colors hover:bg-white/[0.06] hover:text-ink-soft"
+            >
+              <RefreshIcon className="h-3.5 w-3.5" />
+              <span>重新生成</span>
+            </button>
+          ) : null}
+        </div>
       ) : null}
 
       {!streaming && message.sources && message.sources.length > 0 ? (
