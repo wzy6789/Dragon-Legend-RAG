@@ -42,7 +42,7 @@ jobs:
       - name: Build (static export to out/)
         env:
           NEXT_PUBLIC_API_URL: ${{ vars.NEXT_PUBLIC_API_URL || 'https://dragon-legend-rag-api.onrender.com' }}
-          NEXT_PUBLIC_BASE_PATH: ${{ vars.NEXT_PUBLIC_BASE_PATH }}
+          NEXT_PUBLIC_BASE_PATH: ${{ vars.NEXT_PUBLIC_BASE_PATH || '/Dragon-Legend-RAG' }}
         run: pnpm build
 
       - name: Upload artifact
