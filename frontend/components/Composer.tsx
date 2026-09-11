@@ -18,7 +18,8 @@ interface Props {
 
 const TIER_HINT: Record<Tier, string> = {
   flash: "快速、简洁，适合事实类问题。",
-  pro: "更完整，带证据梳理，适合复杂问题。",
+  pro: "v2.1 深度考据：Ewe 证据工作记忆与多轮校验。",
+  max: "v2.2 全力考据：在 Pro 基础上加入章节对齐与认证图谱证据回链。",
 };
 
 export default function Composer({
@@ -113,8 +114,14 @@ export default function Composer({
             <TierButton
               active={tier === "pro"}
               label="Pro"
-              sub="深度考据"
+              sub="v2.1 深度考据"
               onClick={() => onTierChange("pro")}
+            />
+            <TierButton
+              active={tier === "max"}
+              label="Max"
+              sub="v2.2 图谱考据"
+              onClick={() => onTierChange("max")}
             />
           </div>
           <div className="relative">
@@ -135,6 +142,9 @@ export default function Composer({
                 </p>
                 <p className="mt-1">
                   <span className="text-gold-400">Pro</span>：{TIER_HINT.pro}
+                </p>
+                <p className="mt-1">
+                  <span className="text-gold-400">Max</span>：{TIER_HINT.max}
                 </p>
               </div>
             ) : null}

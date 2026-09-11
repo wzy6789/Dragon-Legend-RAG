@@ -4,8 +4,12 @@ import { Markdown } from "@/lib/markdown";
 import type { ChatMessage } from "@/lib/types";
 import SourceDrawer from "./SourceDrawer";
 
-function StatusText({ tier }: { tier?: "flash" | "pro" }) {
-  const label = tier === "pro" ? "正在检索与核验证据…" : "正在回答…";
+function StatusText({ tier }: { tier?: "flash" | "pro" | "max" }) {
+  const label = tier === "max"
+    ? "正在回链图谱与原文证据…"
+    : tier === "pro"
+      ? "正在检索与核验证据…"
+      : "正在回答…";
   return (
     <div className="flex items-center gap-2 py-1 text-[13px] text-ink-muted">
       <span className="flex items-center gap-1">

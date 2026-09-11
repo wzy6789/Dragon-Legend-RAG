@@ -1,4 +1,4 @@
-export type Tier = "flash" | "pro";
+export type Tier = "flash" | "pro" | "max";
 
 export interface SourceItem {
   chapter_index?: number | null;
