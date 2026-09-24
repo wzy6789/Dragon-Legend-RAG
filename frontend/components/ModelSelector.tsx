@@ -18,7 +18,7 @@ const OPTIONS: { key: Tier; label: string; desc: string }[] = [
   {
     key: "max",
     label: "Max",
-    desc: "v2.2 KG-on · 深入检索，提供章节对齐与图谱证据回链。",
+    desc: "v3.0 MAX · 主动补证、反证审校，区分原著事实与有依据的推演。",
   },
 ];
 
