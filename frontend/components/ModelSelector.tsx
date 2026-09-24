@@ -13,12 +13,12 @@ const OPTIONS: { key: Tier; label: string; desc: string }[] = [
   {
     key: "pro",
     label: "Pro",
-    desc: "v2.2 KG-on · 深入检索，提供章节对齐与图谱证据回链。",
+    desc: "v2.5 Pro · 面向复杂问题进行多轮检索、证据审校与修订。",
   },
   {
     key: "max",
     label: "Max",
-    desc: "v2.5 Pro · 面向复杂问题进行多轮检索、证据审校与修订。",
+    desc: "v2.2 KG-on · 深入检索，提供章节对齐与图谱证据回链。",
   },
 ];
 
