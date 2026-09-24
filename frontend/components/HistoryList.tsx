@@ -55,6 +55,9 @@ export default function HistoryList({
           <ul className="space-y-0.5">
             {group.items.map((c) => {
               const active = c.id === activeId;
+              const latestAnswer = [...c.messages].reverse().find((message) => message.role === "assistant");
+              const status = latestAnswer?.status;
+              const running = status === "queued" || status === "running" || status === "streaming" || status === "reviewing";
               if (editingId === c.id) {
                 return (
                   <li key={c.id} className="px-1">
@@ -95,8 +98,9 @@ export default function HistoryList({
                         {c.title}
                       </span>
                       {!collapsed && (
-                        <span className="text-[10.5px] text-ink-faint">
-                          {formatRelative(c.updatedAt)}
+                        <span className="flex w-full items-center gap-1.5 text-[10.5px] text-ink-faint">
+                          {running ? <><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-gold-400" />{status === "queued" ? "排队中" : "回答生成中"}<span className="text-ink-faint/50">·</span></> : null}
+                          <span>{formatRelative(c.updatedAt)}</span>
                         </span>
                       )}
                     </button>

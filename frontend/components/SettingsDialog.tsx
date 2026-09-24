@@ -7,7 +7,7 @@ interface Props {
   open: boolean;
   accessKey: string;
   llmApiKey: string;
-  onSave: (next: { accessKey: string; llmApiKey: string }) => void;
+  onSave: (next: { accessKey: string; llmApiKey: string }, remember: boolean) => void;
   onDisconnect: () => void;
   onClose: () => void;
 }
@@ -24,6 +24,7 @@ export default function SettingsDialog({
   const [llmDraft, setLlmDraft] = useState(llmApiKey);
   const [revealKey, setRevealKey] = useState(false);
   const [revealLlm, setRevealLlm] = useState(false);
+  const [remember, setRemember] = useState(false);
   const firstFieldRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -32,6 +33,7 @@ export default function SettingsDialog({
     setLlmDraft(llmApiKey);
     setRevealKey(false);
     setRevealLlm(false);
+    setRemember(false);
     const t = window.setTimeout(() => firstFieldRef.current?.focus(), 30);
     return () => window.clearTimeout(t);
   }, [open, accessKey, llmApiKey]);
@@ -51,7 +53,7 @@ export default function SettingsDialog({
 
   const submit = () => {
     if (!canSave) return;
-    onSave({ accessKey: keyDraft.trim(), llmApiKey: llmDraft.trim() });
+    onSave({ accessKey: keyDraft.trim(), llmApiKey: llmDraft.trim() }, remember);
     onClose();
   };
 
@@ -143,10 +145,11 @@ export default function SettingsDialog({
             </div>
           </div>
 
-          <p className="text-[11.5px] leading-5 text-ink-faint">
-            保存后会在本机浏览器记住登录（下次打开无需重复填写）；点击「退出当前连接」会立即清除本机保存的
-            访问密码与 API Key 并返回登录页。
-          </p>
+          <label className="flex cursor-pointer items-start gap-2 text-[11.5px] leading-5 text-ink-faint">
+            <input type="checkbox" checked={remember} onChange={(event) => setRemember(event.target.checked)} className="mt-1 h-3.5 w-3.5 accent-[#C9A227]" />
+            <span>在此设备记住访问密码与 API Key。取消勾选时，凭据只保存在当前页面内存，刷新后需要重新输入。</span>
+          </label>
+          <p className="text-[11px] leading-5 text-ink-faint">退出当前连接会清除已保存的凭据；每次回答使用的 API Key 不会存到知识库服务。</p>
         </div>
 
         <div className="mt-5 flex items-center justify-between gap-2">

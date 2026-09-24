@@ -15,7 +15,7 @@ export default function LoginGate({ onSubmit, error, busy }: Props) {
   const [accessKey, setAccessKey] = useState("");
   const [llmApiKey, setLlmApiKey] = useState("");
   const [revealKey, setRevealKey] = useState(false);
-  const [remember, setRemember] = useState(true);
+  const [remember, setRemember] = useState(false);
   const firstRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {

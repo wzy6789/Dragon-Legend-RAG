@@ -1,200 +1,63 @@
-# Dragon King Legend — RAG Web
+# 龙王传说 RAG 官网
 
-面向《斗罗大陆III 龙王传说》知识问答的**前后端分离** RAG 站点。
+这是《斗罗大陆III 龙王传说》知识问答网站的 GitHub Pages 前端。网站访问的完整知识库和 RAG 算法运行在独立的私有服务中；本仓库不包含原著、索引、知识图谱、模型 API Key 或用户对话记录。
 
-- **前端**：Next.js + TypeScript + Tailwind CSS（适配 Vercel）
-- **后端**：FastAPI + Python，SSE 流式回答（适配 Docker / Railway / Render）
-- **模式**：单一聊天入口；Flash（RAG1.0 快速简洁）/ Pro（RAG2.1 深度分析与证据核验）
+## 官网结构
 
-> ⚠️ 版权与数据边界：本仓库**不含**任何小说正文、向量索引、API Key、用户上传资料或聊天记录。
-> 推理所需的资料语料与索引必须在部署时通过**私有卷/环境变量路径**挂载（见 [数据挂载](#数据挂载私有卷)）。
+- 前端：Next.js 静态导出，部署到 GitHub Pages。
+- RAG 服务：私有工作站上的 FastAPI `src/web_bridge.py`，通过 Cloudflare Tunnel 暴露 HTTPS 接口。
+- 历史与任务：浏览器 IndexedDB 保存用户界面的对话；私有 RAG 服务的本机 `data/web_runs.sqlite3` 保存任务快照和可恢复事件。删除对话会请求清理服务端任务记录。
+- 模型 Key：用户发送问题时通过请求头交给私有服务，仅在任务运行期间保存在服务进程内存，不进入网站仓库或任务数据库。
 
----
+仓库内的 `backend/` 是早期独立演示后端，不接入私有完整 RAG，也不应作为官网的生产 RAG 服务部署。
 
-## 目录结构
+## 官网档位
 
-```
-dragon-king-rag-site/
-├── backend/
-│   ├── app/
-│   │   ├── main.py            # FastAPI 入口：/api/chat (SSE)、/api/uploads、/api/health
-│   │   ├── config.py          # 环境变量读取（纯变量名，无密钥默认值）
-│   │   ├── schemas.py         # 请求/事件数据模型
-│   │   ├── chat.py            # 会话历史（内存）+ 流式组装
-│   │   └── rag/
-│   │       ├── retriever.py   # 检索器（BM25 over JSONL 语料；可选 FAISS 向量）
-│   │       ├── engine.py      # RAG1.0 / RAG2.1 两级管线（拆解→检索→核验→组织）
-│   │       └── prompts.py     # 提示词模板
-│   ├── scripts/prepare_corpus.py   # 把私有 txt 语料切块 → corpus.jsonl（离线、自行运行）
-│   ├── requirements.txt
-│   ├── Dockerfile
-│   ├── .dockerignore
-│   └── .env.example
-└── frontend/
-    ├── app/                   # Next.js App Router
-    ├── components/            # 聊天 UI（统一入口 / Flash / Pro / 来源 / 进度）
-    ├── lib/                   # SSE 客户端、类型
-    ├── package.json
-    ├── next.config.mjs / tailwind / tsconfig
-    └── .env.example
-```
+| 页面档位 | 私有 RAG 路由 | 用途 |
+| --- | --- | --- |
+| Flash | v1.9 `sem_select` | 快速事实问答 |
+| Pro | v2.2，KG on | 深入检索与章节证据对齐 |
+| Max | v2.5 Pro | 复杂问题、多轮补检与终稿审校 |
 
-## 快速开始
+每条回答按实际运行版本显示标签。Pro/Max 的实时初稿会标记为“待核验”，只有审校后的终稿才作为最终答案。
 
-### 0. 准备后端环境变量
+## GitHub Pages 部署
 
-```bash
-cd backend
-cp .env.example .env
-# 填写真实值：
-#   LLM_API_KEY=sk-xxxx
-#   LLM_BASE_URL=https://api.deepseek.com/v1   # 任意 OpenAI 兼容端点
-#   LLM_MODEL=deepseek-chat
-#   RAG_DATA_PATH=/mnt/rag-data/corpus.jsonl   # 私有挂载的语料（见“数据挂载”）
-#   CORS_ORIGINS=http://localhost:3000
+GitHub Actions 工作流会构建 `frontend/` 的静态导出。当前网站脚本会在启动本机服务和 Cloudflare Tunnel 后，将新 Tunnel 地址写入工作流并更新 Pages。若手动配置地址：
+
+- `NEXT_PUBLIC_API_URL`：工作流中的当前私有 RAG 服务 HTTPS 地址，不要带末尾斜杠。
+- `NEXT_PUBLIC_BASE_PATH`：GitHub Pages 子路径，当前仓库使用 `/Dragon-Legend-RAG`。
+
+Cloudflare 临时域名更换后，启动脚本会更新工作流并触发前端重新部署。手动改动后，在 GitHub Actions 中重新运行 **Deploy frontend to GitHub Pages**。访问密码、模型 API Key、隧道凭据和其他私密信息都不要放进前端代码；`NEXT_PUBLIC_*` 值会公开给浏览器。
+
+## 本地前端开发
+
+在 `frontend/` 中设置 `.env.local`：
+
+```dotenv
+NEXT_PUBLIC_API_URL=http://localhost:8000
+NEXT_PUBLIC_BASE_PATH=
 ```
 
-### 1. 后端（本地）
+再安装依赖并启动 Next.js 开发服务。前端只调用私有桥接服务，不会从 GitHub Pages 直接运行 Python 或加载本机索引。
 
-```bash
-cd backend
-python -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-uvicorn app.main:app --host 0.0.0.0 --port 8000
-# 健康检查: http://localhost:8000/api/health
-```
+## 私有服务接口
 
-### 2. 后端（Docker）
+新前端使用可恢复的任务接口：
 
-```bash
-cd backend
-docker build -t dragon-king-rag-backend .
-docker run --rm -p 8000:8000 \
-  --env-file .env \
-  -v /absolute/path/to/private-corpus:/mnt/rag-data \
-  dragon-king-rag-backend
-```
+- `POST /api/runs`：创建任务，要求 `X-RAG-Access-Key` 和 `X-LLM-API-Key`。
+- `GET /api/runs/{run_id}`：读取任务快照。
+- `GET /api/runs/{run_id}/events?after={seq}`：从事件序号续接 SSE。
+- `GET /api/runs/by-request/{client_request_id}`：恢复创建请求响应丢失时的任务。
+- `POST /api/runs/{run_id}/cancel`：停止指定任务。
+- `DELETE /api/conversations/{conversation_id}`：清理该对话的服务端任务数据。
+- `GET /api/health`：查看私有服务就绪状态与三档版本映射。
 
-### 3. 前端（本地）
+浏览器切换对话或刷新页面只会断开当前事件订阅；后台任务会继续运行，重新打开对话时可从最后收到的序号恢复。私有服务当前使用单任务队列来保护共享 RAG 配置和 GPU，其他对话会显示排队状态。
 
-```bash
-cd frontend
-cp .env.example .env.local       # NEXT_PUBLIC_API_URL=http://localhost:8000
-npm install
-npm run dev
-# http://localhost:3000
-```
+## 数据与安全边界
 
-### 4. 前端部署到 Vercel
-
-1. 把 `frontend/` 作为独立项目导入 Vercel（Framework Preset: Next.js）。
-2. 设置环境变量 `NEXT_PUBLIC_API_URL=https://<your-backend-domain>`。
-3. Deploy。前端为纯静态可访问页面，SSE 由浏览器直连后端域名。
-
-### 5. 后端部署到 Railway / Render
-
-Railway / Render 均可直接识别根 `backend/Dockerfile`：
-
-- **Railway**：New Project → Deploy from GitHub → Root Directory = `backend`；设置环境变量；可选 Volume 挂载语料目录到 `RAG_DATA_PATH`。
-- **Render**：New Web Service → Root Directory = `backend`，Runtime = Docker；设置环境变量；可挂载 Disk 存放语料。
-- 部署后把公网域名填到前端 `NEXT_PUBLIC_API_URL`，并在后端 `CORS_ORIGINS` 加入前端域名（如 `https://*.vercel.app`）。
-
-#### Render 一键入口（免费在线演示）
-
-仓库根目录的 `render.yaml` 已预设 Render 免费 Web Service、Docker 服务与健康检查。登录 Render 后选择 **New + → Blueprint** 并连接本仓库；只需在创建页填写 `LLM_API_KEY`。服务创建后：
-
-1. 复制服务的 `https://...onrender.com` 地址；
-2. 在 GitHub 仓库 `Settings → Secrets and variables → Actions → Variables` 新增 `NEXT_PUBLIC_API_URL`，值为该地址；
-3. 在 Actions 手动重跑 **Deploy frontend to GitHub Pages**。
-
-默认跨域已允许 `https://wzy6789.github.io`，无需为 GitHub Pages 额外设置 CORS。
-
-> 免费服务会在闲置后休眠，首次请求可能需要等待唤醒；其临时文件系统不能安全保存私有语料，因而本配置只用于在线模型问答演示。完整私有 RAG 应继续在本地运行，或使用带持久磁盘的托管方案。
-
----
-
-## 接口约定
-
-### `POST /api/chat`（SSE）
-
-请求：
-
-```json
-{ "message": "……", "tier": "flash", "conversation_id": "abc123" }
-```
-
-- `tier = "flash"` → 映射 **RAG1.0**：单轮轻量检索，回答快速简洁。
-- `tier = "pro"` → 映射 **RAG2.1**：拆解 → 多路检索 → 证据核验 → 组织回答。
-- `conversation_id` 可选；不传则后端自动生成。历史保存在后端内存，重启即清空（多副本场景建议外接 Redis，见文末）。
-
-响应（`text/event-stream`），事件类型：
-
-```
-event: stage     data: {"stage":"拆解问题"}          # 仅 pro
-event: token     data: {"text":"……"}                # 流式增量
-event: sources   data: {"sources":[{"chapter":"第12章","chapter_index":12,"title":"…","snippet":"…"}]}
-event: done      data: {"conversation_id":"abc123"}
-event: error     data: {"message":"……"}
-```
-
-### `POST /api/uploads`
-
-补充资料（保留入口）。Multipart 字段 `file`，`tier` 忽略。文件保存到私有 `uploads/`（不入 Git；生产建议独立卷）。可选地加入语料库用于后续检索（默认关闭，置 `UPLOAD_ENABLE_INGEST=true` 开启）。
-
-### `GET /api/health`
-
-```json
-{ "status":"ok", "corpus_chunks": 12345, "vector_index": false }
-```
-
----
-
-## 数据挂载（私有卷）
-
-语料与向量索引属于**受版权保护资料**，绝不进 Git。部署时二选一：
-
-1. **BM25 JSONL 语料（推荐，零向量依赖）**
-   - 在本地用 `python backend/scripts/prepare_corpus.py --input 原著.txt --output corpus.jsonl` 把**你自己拥有的资料**切成块（每块带 `chapter`/`chapter_index`/`title`/`text`）。
-   - 上传/挂载 `corpus.jsonl` 到容器内 `RAG_DATA_PATH` 指向的路径（例如 `-v /mnt/private:/mnt/rag-data`）。
-
-2. **FAISS 向量索引（可选，增强召回）**
-   - 自行构建后挂载到 `VECTOR_INDEX_PATH`；安装 `requirements-vector.txt` 中的可选依赖（faiss-cpu、sentence-transformers）。
-   - 检索器优先使用向量索引，缺失时回退 BM25。
-
-`prepare_corpus.py` 与检索器都**只处理用户提供的私有文件**；仓库内不附带任何正文。
-
----
-
-## 环境变量
-
-| 变量 | 必填 | 说明 |
-|---|---|---|
-| `LLM_API_KEY` | 是 | OpenAI 兼容推理服务密钥 |
-| `LLM_BASE_URL` | 是 | 推理服务 Base URL（如 `https://api.deepseek.com/v1`） |
-| `LLM_MODEL` | 否 | 模型名（默认 `deepseek-chat`） |
-| `RAG_DATA_PATH` | 是* | JSONL 语料路径（部署时挂载）。*缺失时服务仍启动，检索结果为空并提示 |
-| `VECTOR_INDEX_PATH` | 否 | FAISS 索引路径（可选） |
-| `EMBED_MODEL_NAME` | 否 | 向量模型名（可选，默认 `BAAI/bge-m3`） |
-| `UPLOAD_DIR` | 否 | 上传资料保存目录（默认 `./uploads`） |
-| `UPLOAD_ENABLE_INGEST` | 否 | 是否把上传资料并入语料（默认 false） |
-| `CORS_ORIGINS` | 否 | 逗号分隔的允许来源（默认 `http://localhost:3000`） |
-| `MAX_HISTORY_TURNS` | 否 | 内存会话保留轮数（默认 12） |
-
-前端：
-
-| 变量 | 说明 |
-|---|---|
-| `NEXT_PUBLIC_API_URL` | 后端公网/本地地址，如 `http://localhost:8000` |
-
----
-
-## 聊天记录与数据隐私
-
-- 会话历史仅存后端进程内存（`conversation_id` 键控），进程重启即清空；不做持久化，避免把聊天记录带入任何存储。
-- 前端不上传历史，仅保留 `conversation_id` 引用。
-- 多实例/水平扩展场景：将历史外置到 Redis 需要自行扩展 `chat.py`（当前为单进程内存实现）。
-
-## 许可与版权
-
-代码部分可按你的项目约定授权；**任何受版权保护的小说正文、向量库、密钥均不随仓库分发**。
+- 小说资料、FAISS/BM25 索引和知识图谱仅保存在私有 RAG 项目及本机数据目录。
+- GitHub Pages 是公开静态站点；不要在任何 `NEXT_PUBLIC_*` 变量、前端文件或页面事件中放密钥。
+- 访问密码和模型 Key 默认只存在当前页面内存；只有用户主动勾选“在此设备记住”才保存在该浏览器本地。
+- 本机服务重启会将当时未完成的任务标记为中断，并保留已保存的部分内容；任务不会伪装成成功完成。

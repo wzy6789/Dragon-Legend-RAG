@@ -8,17 +8,17 @@ const OPTIONS: { key: Tier; label: string; desc: string }[] = [
   {
     key: "flash",
     label: "Flash",
-    desc: "快速回答，适合人物、设定与单点事实问题。",
+    desc: "v1.9 sem_select · 快速回答，适合单点事实与日常问题。",
   },
   {
     key: "pro",
     label: "Pro",
-    desc: "v2.1 深度考据：Ewe 证据工作记忆与多轮核验。",
+    desc: "v2.2 KG-on · 深入检索，提供章节对齐与图谱证据回链。",
   },
   {
     key: "max",
     label: "Max",
-    desc: "v2.2 全力考据：章节对齐与认证图谱证据回链。",
+    desc: "v2.5 Pro · 面向复杂问题进行多轮检索、证据审校与修订。",
   },
 ];
 
@@ -26,11 +26,9 @@ const OPTIONS: { key: Tier; label: string; desc: string }[] = [
 export default function ModelSelector({
   value,
   onChange,
-  disabled,
 }: {
   value: Tier;
   onChange: (t: Tier) => void;
-  disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
@@ -57,7 +55,7 @@ export default function ModelSelector({
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        disabled={disabled}
+        disabled={false}
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label={`回答模式：${current.label}`}

@@ -7,10 +7,9 @@ import MessageItem from "./MessageItem";
 
 interface Props {
   messages: ChatMessage[];
-  /** 正在流式生成的回答（独立渲染，避免整段历史重绘） */
-  streamingMessage: ChatMessage | null;
   onPick: (text: string) => void;
   onRegenerate: (messageId: string) => void;
+  onDeleteMessage: (messageId: string) => void;
   scrollRef: RefObject<HTMLDivElement | null>;
   bottomRef: RefObject<HTMLDivElement | null>;
   onScroll: () => void;
@@ -18,27 +17,24 @@ interface Props {
 
 export default function ChatView({
   messages,
-  streamingMessage,
   onPick,
   onRegenerate,
+  onDeleteMessage,
   scrollRef,
   bottomRef,
   onScroll,
 }: Props) {
-  const empty = messages.length === 0 && !streamingMessage;
+  const empty = messages.length === 0;
 
   return (
-    <div ref={scrollRef} onScroll={onScroll} className="h-full overflow-y-auto">
+    <div ref={scrollRef} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto">
       {empty ? (
         <EmptyState onPick={onPick} />
       ) : (
-        <div className="mx-auto w-full max-w-[880px] space-y-6 px-4 py-6 sm:px-6 sm:py-8">
+        <div className="mx-auto w-full max-w-[980px] space-y-8 px-4 py-7 sm:px-8 sm:py-10">
           {messages.map((m) => (
-            <MessageItem key={m.id} message={m} onRegenerate={onRegenerate} />
+            <MessageItem key={m.id} message={m} onRegenerate={onRegenerate} onDelete={onDeleteMessage} />
           ))}
-          {streamingMessage ? (
-            <MessageItem key="streaming" message={streamingMessage} />
-          ) : null}
           <div ref={bottomRef} />
         </div>
       )}

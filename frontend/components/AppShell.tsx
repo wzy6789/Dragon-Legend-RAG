@@ -1,9 +1,10 @@
 "use client";
 
 import type { ReactNode } from "react";
-import type { Conversation } from "@/lib/types";
+import type { Conversation, SourceItem, Tier } from "@/lib/types";
 import Sidebar from "./Sidebar";
 import TopBar from "./TopBar";
+import EvidencePanel from "./EvidencePanel";
 
 interface Props {
   conversations: Conversation[];
@@ -13,10 +14,16 @@ interface Props {
   collapsed: boolean;
   mobileOpen: boolean;
   signedIn: boolean;
+  connection: string;
+  tier: Tier;
+  evidence: SourceItem[];
+  evidenceOpen: boolean;
+  onToggleEvidence: () => void;
+  onExportConversation: () => void;
   onToggleCollapse: () => void;
   onOpenMobileSidebar: () => void;
   onCloseMobileSidebar: () => void;
-  onQueryChange: (q: string) => void;
+  onQueryChange: (query: string) => void;
   onNewChat: () => void;
   onSelectConversation: (id: string) => void;
   onRenameConversation: (id: string, title: string) => void;
@@ -27,58 +34,45 @@ interface Props {
   footer: ReactNode;
 }
 
-/** 全屏应用外壳：左侧历史栏 + 右侧主工作区（顶栏 / 内容 / 输入区） */
-export default function AppShell({
-  conversations,
-  activeId,
-  title,
-  query,
-  collapsed,
-  mobileOpen,
-  signedIn,
-  onToggleCollapse,
-  onOpenMobileSidebar,
-  onCloseMobileSidebar,
-  onQueryChange,
-  onNewChat,
-  onSelectConversation,
-  onRenameConversation,
-  onDeleteConversation,
-  onOpenSettings,
-  onClearHistory,
-  children,
-  footer,
-}: Props) {
+export default function AppShell(props: Props) {
   return (
-    <div className="flex h-dvh w-screen overflow-hidden bg-base">
+    <div className="app-shell">
       <Sidebar
-        conversations={conversations}
-        activeId={activeId}
-        query={query}
-        collapsed={collapsed}
-        mobileOpen={mobileOpen}
-        signedIn={signedIn}
-        onToggleCollapse={onToggleCollapse}
-        onCloseMobile={onCloseMobileSidebar}
-        onQueryChange={onQueryChange}
-        onNewChat={onNewChat}
-        onSelect={onSelectConversation}
-        onRename={onRenameConversation}
-        onDelete={onDeleteConversation}
-        onOpenSettings={onOpenSettings}
-        onClearHistory={onClearHistory}
+        conversations={props.conversations}
+        activeId={props.activeId}
+        query={props.query}
+        collapsed={props.collapsed}
+        mobileOpen={props.mobileOpen}
+        signedIn={props.signedIn}
+        onToggleCollapse={props.onToggleCollapse}
+        onCloseMobile={props.onCloseMobileSidebar}
+        onQueryChange={props.onQueryChange}
+        onNewChat={props.onNewChat}
+        onSelect={props.onSelectConversation}
+        onRename={props.onRenameConversation}
+        onDelete={props.onDeleteConversation}
+        onOpenSettings={props.onOpenSettings}
+        onClearHistory={props.onClearHistory}
       />
-
-      {/* 主工作区：填满剩余宽度 */}
-      <div className="flex min-w-0 flex-1 flex-col">
+      <main className="flex min-w-0 flex-1 flex-col">
         <TopBar
-          title={title}
-          onOpenSidebar={onOpenMobileSidebar}
-          onOpenSettings={onOpenSettings}
+          title={props.title}
+          tier={props.tier}
+          connection={props.connection}
+          evidenceOpen={props.evidenceOpen}
+          onOpenSidebar={props.onOpenMobileSidebar}
+          onOpenSettings={props.onOpenSettings}
+          onToggleEvidence={props.onToggleEvidence}
+          onExport={props.onExportConversation}
         />
-        <div className="min-h-0 flex-1">{children}</div>
-        {footer}
-      </div>
+        <div className="flex min-h-0 flex-1">
+          <section className="flex min-w-0 flex-1 flex-col">{props.children}{props.footer}</section>
+          {props.evidenceOpen ? <>
+            <button type="button" aria-label="关闭证据栏" onClick={props.onToggleEvidence} className="fixed inset-0 z-10 bg-black/35 lg:hidden" />
+            <EvidencePanel sources={props.evidence} onClose={props.onToggleEvidence} />
+          </> : null}
+        </div>
+      </main>
     </div>
   );
 }
