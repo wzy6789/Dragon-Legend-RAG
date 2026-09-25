@@ -9,7 +9,7 @@ import { CheckIcon, CopyIcon, RefreshIcon, TrashIcon } from "./icons";
 const TIER_LABEL: Record<Tier, string> = {
   flash: "Flash · v1.9 sem_select",
   pro: "Pro · v2.5 Pro",
-  max: "Max · v3.0 MAX",
+  max: "Max · v3.1 MAX",
 };
 
 function LiveStatus({ message }: { message: ChatMessage }) {

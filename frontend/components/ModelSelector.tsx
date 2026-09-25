@@ -18,7 +18,7 @@ const OPTIONS: { key: Tier; label: string; desc: string }[] = [
   {
     key: "max",
     label: "Max",
-    desc: "v3.0 MAX · 主动补证、反证审校，区分原著事实与有依据的推演。",
+    desc: "v3.1 MAX · 结论核验、时间线图谱导航、主动补证与反证审校。",
   },
 ];
 

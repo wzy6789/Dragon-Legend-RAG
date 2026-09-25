@@ -7,7 +7,7 @@ import { BookIcon, DownloadIcon, MenuIcon, SettingsIcon } from "./icons";
 const VERSION_LABEL: Record<Tier, string> = {
   flash: "v1.9 · sem_select",
   pro: "v2.5 Pro",
-  max: "v3.0 MAX",
+  max: "v3.1 MAX",
 };
 
 interface Props {
