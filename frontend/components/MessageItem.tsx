@@ -46,16 +46,18 @@ interface Props {
 
 function MessageItemImpl({ message, onRegenerate, onDelete }: Props) {
   const [copied, setCopied] = useState(false);
+  const [copyError, setCopyError] = useState(false);
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(message.content);
       setCopied(true);
+      setCopyError(false);
       window.setTimeout(() => setCopied(false), 1500);
-    } catch { /* Clipboard can be unavailable in insecure browser contexts. */ }
+    } catch { setCopyError(true); }
   };
   const actions = (
-    <div className="mt-2 flex items-center gap-1 opacity-100 transition-opacity sm:opacity-0 group-hover:opacity-100 focus-within:opacity-100">
-      <button type="button" onClick={() => void copy()} aria-label="复制消息" title={copied ? "已复制" : "复制"} className="message-action">
+    <div className="mt-3 flex flex-wrap items-center gap-1">
+      <button type="button" disabled={!message.content} onClick={() => void copy()} aria-label="复制消息" title={copied ? "已复制" : "复制"} className="message-action disabled:opacity-40">
         {copied ? <CheckIcon className="h-3.5 w-3.5" /> : <CopyIcon className="h-3.5 w-3.5" />}
         <span>{copied ? "已复制" : "复制"}</span>
       </button>
@@ -69,6 +71,7 @@ function MessageItemImpl({ message, onRegenerate, onDelete }: Props) {
           <TrashIcon className="h-3.5 w-3.5" /><span>删除</span>
         </button>
       ) : null}
+      {copyError ? <span role="status" className="text-xs text-amber-200">复制失败，请手动选择正文复制</span> : null}
     </div>
   );
 

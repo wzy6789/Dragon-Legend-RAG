@@ -6,6 +6,36 @@
   color-scheme: dark;
 }
 
+button:focus-visible, a:focus-visible, input:focus-visible {
+  outline: 2px solid #d9b84a;
+  outline-offset: 3px;
+}
+
+.latest-button {
+  position: absolute;
+  bottom: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 16px;
+  border: 1px solid rgba(255, 255, 255, .16);
+  border-radius: 999px;
+  background: #20242b;
+  color: #eceff2;
+  font-size: 12px;
+  box-shadow: 0 5px 24px #0005;
+}
+.latest-button:hover { background: #2b3039; }
+.composer-dock { padding-bottom: max(12px, env(safe-area-inset-bottom)); }
+.conversation-column { max-width: 1120px; }
+@media (min-width: 1600px) {
+  .conversation-column { max-width: 1240px; }
+  .prose-thread { font-size: 16px; }
+  .evidence-panel { width: 360px; flex-basis: 360px; }
+}
+
 html,
 body {
   height: 100%;
@@ -68,7 +98,7 @@ body {
   gap: 5px;
   border-radius: 8px;
   padding: 5px 7px;
-  color: #737a84;
+  color: #a0a7b1;
   font-size: 11px;
   transition: color 130ms ease, background 130ms ease;
 }
@@ -133,7 +163,7 @@ body {
   /* 回答正文排版（Markdown 容器） */
   .prose-thread {
     font-size: 15px;
-    line-height: 1.75;
+    line-height: 1.9;
     color: #eceff2;
     word-break: break-word;
   }
@@ -147,6 +177,7 @@ body {
     font-weight: 600;
     line-height: 1.45;
     color: #f1f3f5;
+    margin-top: 1.5em;
   }
   .prose-thread h1 {
     font-size: 1.2rem;
@@ -215,4 +246,12 @@ body {
     text-decoration: underline;
     text-underline-offset: 2px;
   }
+}
+
+.prose-thread > :first-child { margin-top: 0; }
+.prose-thread table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; font-size: 14px; }
+.prose-thread th, .prose-thread td { padding: 10px 14px; border: 1px solid #ffffff16; text-align: left; min-width: 100px; }
+.prose-thread th { background: #ffffff08; color: #e8dcb4; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
 }

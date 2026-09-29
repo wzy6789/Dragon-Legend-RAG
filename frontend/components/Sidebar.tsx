@@ -101,14 +101,14 @@ function SidebarImpl({
           <button
             type="button"
             onClick={onNewChat}
-            title="新建对话"
+            title="新建对话（Ctrl / ⌘ + Shift + O）"
             className={
               "flex items-center gap-2 rounded-[10px] border border-white/[0.08] bg-white/[0.03] text-[12.5px] text-ink-soft transition-colors hover:border-gold-500/30 hover:bg-white/[0.06] hover:text-ink " +
               (collapsed ? "mx-auto h-9 w-9 justify-center" : "w-full px-3 py-2")
             }
           >
             <PlusIcon className="h-4 w-4 shrink-0" />
-            {!collapsed && <span>新建对话</span>}
+            {!collapsed && <><span>新建对话</span><kbd className="ml-auto text-[10px] text-ink-faint">⇧ O</kbd></>}
           </button>
         </div>
 

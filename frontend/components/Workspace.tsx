@@ -25,7 +25,7 @@ interface Creds { accessKey: string; llmApiKey: string }
 
 function pendingMessage(conversation?: Conversation): ChatMessage | undefined {
   return conversation?.messages.find((message) =>
-    message.role === "assistant" && message.runId && ACTIVE_STATUSES.has(message.status ?? ""));
+    message.role === "assistant" && ACTIVE_STATUSES.has(message.status ?? ""));
 }
 
 function statusFromSnapshot(status: string): ChatMessage["status"] {
@@ -76,6 +76,8 @@ export default function Workspace() {
   const recoveringRef = useRef<Set<string>>(new Set());
   const startingRequestsRef = useRef<Set<string>>(new Set());
   const stickRef = useRef(true);
+  const draftsRef = useRef<Map<string, string>>(new Map());
+  const [showLatest, setShowLatest] = useState(false);
 
   const signedIn = Boolean(creds?.accessKey && creds?.llmApiKey);
   const active = useMemo(() => conversations.find((c) => c.id === activeId) ?? null, [conversations, activeId]);
@@ -125,6 +127,7 @@ export default function Workspace() {
   useEffect(() => {
     const stored = loadStoredCredentials();
     if (stored) setCreds(stored);
+    try { setCollapsed(localStorage.getItem("dragon-legend.sidebar-collapsed") === "true"); } catch { /* optional preference */ }
     setHydrated(true);
   }, []);
 
@@ -181,7 +184,16 @@ export default function Workspace() {
 
   const onScroll = useCallback(() => {
     const el = scrollRef.current;
-    if (el) stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+    if (el) {
+      stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+      setShowLatest(!stickRef.current);
+    }
+  }, []);
+
+  const scrollToLatest = useCallback(() => {
+    stickRef.current = true;
+    setShowLatest(false);
+    bottomRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });
   }, []);
 
   const applyEvent = useCallback((conversationId: string, messageId: string, type: string, event: RunEvent) => {
@@ -419,9 +431,10 @@ export default function Workspace() {
       messages: [...current.messages, { id: newId(), role: "user", content: prompt, createdAt: Date.now() }],
     }), true);
     setInput("");
+    draftsRef.current.delete(activeId ?? "new");
     stickRef.current = true;
     void launchRun(conversation.id, prompt, tier, true);
-  }, [active, createConversation, creds, input, launchRun, tier, updateConversation]);
+  }, [active, activeId, createConversation, creds, input, launchRun, tier, updateConversation]);
 
   const stopActiveRun = useCallback(async () => {
     if (!activeRunId || !creds) return;
@@ -491,12 +504,15 @@ export default function Workspace() {
   }, [active]);
 
   const selectConversation = useCallback((id: string) => {
+    draftsRef.current.set(activeId ?? "new", input);
+    setInput(draftsRef.current.get(id) ?? "");
+    setShowLatest(false);
     setActiveId(id);
     setMobileOpen(false);
     const conversation = convsRef.current.find((item) => item.id === id);
     if (conversation) setTier(conversation.tier);
     stickRef.current = true;
-  }, []);
+  }, [activeId, input]);
 
   const renameConversation = useCallback((id: string, nextTitle: string) => {
     updateConversation(id, (conversation) => ({ ...conversation, title: nextTitle, updatedAt: Date.now() }), true);
@@ -520,7 +536,14 @@ export default function Workspace() {
     convsRef.current = rest;
     setConversations(rest);
     void deleteConversationRow(id);
-    if (id === activeId) setActiveId(rest[0]?.id ?? null);
+    draftsRef.current.delete(id);
+    if (id === activeId) {
+      const nextId = rest[0]?.id ?? null;
+      setActiveId(nextId);
+      setInput(draftsRef.current.get(nextId ?? "new") ?? "");
+      stickRef.current = true;
+      setShowLatest(false);
+    }
   }, [activeId, creds]);
 
   const clearAllHistory = useCallback(async () => {
@@ -541,6 +564,8 @@ export default function Workspace() {
     convsRef.current = [];
     setConversations([]);
     setActiveId(null);
+    draftsRef.current.clear();
+    setInput("");
     await clearConversations();
     setConfirmClearOpen(false);
   }, [creds]);
@@ -551,18 +576,31 @@ export default function Workspace() {
   }, [active, updateConversation]);
 
   const newChat = useCallback(() => {
+    draftsRef.current.set(activeId ?? "new", input);
     createConversation(tier);
     setInput("");
+    setShowLatest(false);
     setMobileOpen(false);
     stickRef.current = true;
     window.setTimeout(() => inputRef.current?.focus(), 20);
-  }, [createConversation, tier]);
+  }, [activeId, input, createConversation, tier]);
 
   const disconnect = useCallback(() => {
     clearStoredCredentials();
     setCreds(null);
     setLoginError("");
   }, []);
+
+  useEffect(() => {
+    const handler = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === "o" && signedIn) {
+        event.preventDefault();
+        newChat();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [newChat, signedIn]);
 
   const pickSuggestion = useCallback((text: string) => {
     setInput(text);
@@ -594,7 +632,10 @@ export default function Workspace() {
         evidenceOpen={evidenceOpen}
         onToggleEvidence={() => setEvidenceOpen((value) => !value)}
         onExportConversation={exportConversation}
-        onToggleCollapse={() => setCollapsed((value) => !value)}
+        onToggleCollapse={() => {
+          setCollapsed(!collapsed);
+          try { localStorage.setItem("dragon-legend.sidebar-collapsed", String(!collapsed)); } catch { /* optional preference */ }
+        }}
         onOpenMobileSidebar={() => setMobileOpen(true)}
         onCloseMobileSidebar={() => setMobileOpen(false)}
         onQueryChange={setQuery}
@@ -617,6 +658,12 @@ export default function Workspace() {
           />
         }
       >
+        {connection !== "ready" ? (
+          <div role="status" className="flex items-center justify-between gap-3 border-b border-amber-300/10 bg-amber-300/[0.04] px-6 py-2 text-xs leading-5 text-amber-100/80">
+            <span>{connection === "offline" ? "暂时无法连接知识库。已保留对话，系统会自动重连。" : "正在连接或预热知识库，请稍候…"}</span>
+            <button type="button" className="shrink-0 underline underline-offset-4" onClick={() => setSettingsOpen(true)}>连接设置</button>
+          </div>
+        ) : null}
         <ChatView
           messages={active?.messages ?? []}
           onPick={pickSuggestion}
@@ -625,6 +672,8 @@ export default function Workspace() {
           scrollRef={scrollRef}
           bottomRef={bottomRef}
           onScroll={onScroll}
+          showLatest={showLatest}
+          onLatest={scrollToLatest}
         />
       </AppShell>
 

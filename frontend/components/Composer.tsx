@@ -29,8 +29,8 @@ export default function Composer({ value, onChange, onSend, onStop, busy, tier, 
 
   const canSend = value.trim().length > 0 && !busy;
   return (
-    <div className="shrink-0 px-3 pb-3 sm:px-7 sm:pb-5">
-      <div className="mx-auto w-full max-w-[980px]">
+    <div className="composer-dock shrink-0 px-3 pb-3 sm:px-7 sm:pb-5">
+      <div className="conversation-column mx-auto w-full">
         <div className="composer-surface">
           <textarea
             ref={ref}
@@ -43,14 +43,16 @@ export default function Composer({ value, onChange, onSend, onStop, busy, tier, 
               }
             }}
             rows={1}
+            maxLength={4000}
             placeholder="向龙王传说考据助手提问…"
             aria-label="输入问题"
-            className="max-h-44 min-h-8 w-full resize-none bg-transparent px-2 py-1.5 text-[14.5px] leading-6 text-ink placeholder:text-ink-faint focus:outline-none"
+            className="max-h-44 min-h-8 w-full resize-none bg-transparent px-2 py-1.5 text-[16px] sm:text-[15px] leading-6 text-ink placeholder:text-ink-faint focus:outline-none"
           />
           <div className="mt-2 flex items-center justify-between gap-3 border-t border-white/[0.06] pt-2">
             <div className="flex min-w-0 items-center gap-2">
               <ModelSelector value={tier} onChange={onTierChange} />
-              <span className="hidden text-[11px] text-ink-faint sm:inline">Enter 发送 · Shift + Enter 换行</span>
+              <span className="hidden text-[11px] text-ink-faint sm:inline">{busy ? "切换对话后，当前任务仍会继续" : "Enter 发送 · Shift + Enter 换行"}</span>
+              {value.length > 3600 ? <span className="text-[11px] text-amber-200" aria-live="polite">{value.length}/4000</span> : null}
             </div>
             {busy ? (
               <button type="button" onClick={onStop} aria-label="停止当前回答" title="停止当前回答" className="composer-stop">
