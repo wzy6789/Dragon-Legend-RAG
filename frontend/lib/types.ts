@@ -39,7 +39,7 @@ export interface ChatMessage {
   createdAt: number;
 }
 
-/** 本地会话（持久化到 IndexedDB；绝不包含访问密码 / API Key 等凭据） */
+/** 本地会话（持久化到 IndexedDB；不包含 API Key 等凭据） */
 export interface Conversation {
   id: string;
   title: string;
@@ -51,8 +51,7 @@ export interface Conversation {
 
 /** 会话级凭据：仅存在于 React 内存，刷新即失效 */
 export interface SessionCredentials {
-  accessKey: string;
-  llmApiKey: string;
+  apiKey: string;
 }
 
 export type ApiErrorKind = "auth" | "rate" | "model" | "network" | "server" | "unknown";

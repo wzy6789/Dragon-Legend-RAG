@@ -1,9 +1,8 @@
 /**
  * 本机登录态（可选记忆）。
  *
- * 说明：默认登录页勾选「在这台电脑上记住登录」后，才把凭据写入本机 localStorage，
- * 以便同一台电脑再次打开网站时免去重复填写；取消勾选或点击「退出当前连接」会立即清除。
- * 不勾选时凭据只存在于 React 内存。
+ * 只在用户选择记住时，将单个 API Key 写入本机 localStorage。
+ * 读取旧版双凭据格式时自动提取模型 API Key 并迁移。
  */
 
 const STORAGE_KEY = "dragon-legend-rag.login.v1";
@@ -28,9 +27,13 @@ export function loadStoredCredentials(): StoredCredentials | null {
   try {
     const raw = store.getItem(STORAGE_KEY);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as Partial<StoredCredentials>;
-    if (!parsed.accessKey || !parsed.llmApiKey) return null;
-    return { accessKey: parsed.accessKey, llmApiKey: parsed.llmApiKey };
+    const parsed = JSON.parse(raw) as { apiKey?: string; accessKey?: string; llmApiKey?: string };
+    const apiKey = parsed.apiKey || parsed.llmApiKey;
+    if (!apiKey) return null;
+    if (parsed.apiKey !== apiKey) {
+      store.setItem(STORAGE_KEY, JSON.stringify({ apiKey }));
+    }
+    return { accessKey: apiKey, llmApiKey: apiKey };
   } catch {
     return null;
   }
@@ -40,7 +43,7 @@ export function saveStoredCredentials(creds: StoredCredentials): void {
   const store = safeStorage();
   if (!store) return;
   try {
-    store.setItem(STORAGE_KEY, JSON.stringify(creds));
+    store.setItem(STORAGE_KEY, JSON.stringify({ apiKey: creds.llmApiKey }));
   } catch {
     /* 静默：写入失败不影响本次会话 */
   }

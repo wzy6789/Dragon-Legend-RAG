@@ -5,38 +5,32 @@ import { CloseIcon, EyeIcon, EyeOffIcon } from "./icons";
 
 interface Props {
   open: boolean;
-  accessKey: string;
   llmApiKey: string;
-  onSave: (next: { accessKey: string; llmApiKey: string }, remember: boolean) => void;
+  onSave: (apiKey: string, remember: boolean) => void;
   onDisconnect: () => void;
   onClose: () => void;
 }
 
 export default function SettingsDialog({
   open,
-  accessKey,
   llmApiKey,
   onSave,
   onDisconnect,
   onClose,
 }: Props) {
-  const [keyDraft, setKeyDraft] = useState(accessKey);
   const [llmDraft, setLlmDraft] = useState(llmApiKey);
-  const [revealKey, setRevealKey] = useState(false);
   const [revealLlm, setRevealLlm] = useState(false);
-  const [remember, setRemember] = useState(false);
+  const [remember, setRemember] = useState(true);
   const firstFieldRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     if (!open) return;
-    setKeyDraft(accessKey);
     setLlmDraft(llmApiKey);
-    setRevealKey(false);
     setRevealLlm(false);
-    setRemember(false);
+    setRemember(true);
     const t = window.setTimeout(() => firstFieldRef.current?.focus(), 30);
     return () => window.clearTimeout(t);
-  }, [open, accessKey, llmApiKey]);
+  }, [open, llmApiKey]);
 
   useEffect(() => {
     if (!open) return;
@@ -49,11 +43,11 @@ export default function SettingsDialog({
 
   if (!open) return null;
 
-  const canSave = keyDraft.trim().length > 0 && llmDraft.trim().length > 0;
+  const canSave = llmDraft.trim().length > 0;
 
   const submit = () => {
     if (!canSave) return;
-    onSave({ accessKey: keyDraft.trim(), llmApiKey: llmDraft.trim() }, remember);
+    onSave(llmDraft.trim(), remember);
     onClose();
   };
 
@@ -72,7 +66,7 @@ export default function SettingsDialog({
           <div>
             <h2 className="text-[14.5px] font-semibold text-ink">连接设置</h2>
             <p className="mt-1 text-[12px] leading-5 text-ink-muted">
-              访问密码保护知识库；API Key 用于调用你自己的模型额度。
+              API Key 用于调用你自己的 DeepSeek 额度和识别你的对话记录。
             </p>
           </div>
           <button
@@ -87,42 +81,13 @@ export default function SettingsDialog({
 
         <div className="space-y-4">
           <div>
-            <label htmlFor="setting-access-key" className="mb-1.5 block text-[12.5px] text-ink-soft">
-              访问密码
-            </label>
-            <div className="relative">
-              <input
-                id="setting-access-key"
-                ref={firstFieldRef}
-                type={revealKey ? "text" : "password"}
-                value={keyDraft}
-                onChange={(e) => setKeyDraft(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") submit();
-                }}
-                autoComplete="off"
-                spellCheck={false}
-                placeholder="输入访问密码"
-                className="w-full rounded-[12px] border border-white/[0.08] bg-[#111418] px-3.5 py-2.5 pr-11 text-[13.5px] text-ink placeholder:text-ink-faint focus:border-gold-500/50 focus:outline-none"
-              />
-              <button
-                type="button"
-                onClick={() => setRevealKey((v) => !v)}
-                aria-label={revealKey ? "隐藏访问密码" : "显示访问密码"}
-                className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-lg p-2 text-ink-faint transition-colors hover:text-ink-muted"
-              >
-                {revealKey ? <EyeOffIcon className="h-4 w-4" /> : <EyeIcon className="h-4 w-4" />}
-              </button>
-            </div>
-          </div>
-
-          <div>
             <label htmlFor="setting-llm-key" className="mb-1.5 block text-[12.5px] text-ink-soft">
               DeepSeek API Key
             </label>
             <div className="relative">
               <input
                 id="setting-llm-key"
+                ref={firstFieldRef}
                 type={revealLlm ? "text" : "password"}
                 value={llmDraft}
                 onChange={(e) => setLlmDraft(e.target.value)}
@@ -147,9 +112,9 @@ export default function SettingsDialog({
 
           <label className="flex cursor-pointer items-start gap-2 text-[11.5px] leading-5 text-ink-faint">
             <input type="checkbox" checked={remember} onChange={(event) => setRemember(event.target.checked)} className="mt-1 h-3.5 w-3.5 accent-[#C9A227]" />
-            <span>在此设备记住访问密码与 API Key。取消勾选时，凭据只保存在当前页面内存，刷新后需要重新输入。</span>
+            <span>在此设备记住 API Key；取消勾选后，刷新页面需要重新输入。</span>
           </label>
-          <p className="text-[11px] leading-5 text-ink-faint">退出当前连接会清除已保存的凭据；每次回答使用的 API Key 不会存到知识库服务。</p>
+          <p className="text-[11px] leading-5 text-ink-faint">退出当前连接会清除已保存的 API Key。服务仅在任务运行期间暂存该 Key。</p>
         </div>
 
         <div className="mt-5 flex items-center justify-between gap-2">

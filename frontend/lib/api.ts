@@ -8,8 +8,7 @@ export interface RunRequestOptions {
   tier: Tier;
   conversationId: string;
   clientRequestId: string;
-  accessKey: string;
-  llmApiKey: string;
+  apiKey: string;
 }
 
 export interface RunEventHandlers {
@@ -17,7 +16,7 @@ export interface RunEventHandlers {
 }
 
 export const ERROR_TEXT: Record<ApiErrorKind, string> = {
-  auth: "访问密码错误，请重新连接知识库。",
+  auth: "API Key 无法验证，请检查后重新连接。",
   rate: "当前任务较多，请稍后重试。",
   model: "API Key 无效、额度不足或模型服务不可用。",
   network: "连接中断，正在尝试恢复任务。",
@@ -25,9 +24,9 @@ export const ERROR_TEXT: Record<ApiErrorKind, string> = {
   unknown: "请求失败，请稍后重试。",
 };
 
-function authHeaders(accessKey: string, llmApiKey?: string): Record<string, string> {
-  const headers: Record<string, string> = { "X-RAG-Access-Key": accessKey };
-  if (llmApiKey) headers["X-LLM-API-Key"] = llmApiKey;
+function authHeaders(apiKey: string, includeModelKey = false): Record<string, string> {
+  const headers: Record<string, string> = { "X-RAG-Access-Key": apiKey };
+  if (includeModelKey) headers["X-LLM-API-Key"] = apiKey;
   return headers;
 }
 
@@ -62,7 +61,7 @@ export async function createRun(options: RunRequestOptions): Promise<RunSnapshot
         cache: "no-store",
         headers: {
           "Content-Type": "application/json",
-          ...authHeaders(options.accessKey, options.llmApiKey),
+          ...authHeaders(options.apiKey, true),
         },
         body: JSON.stringify({
           message: options.message,

@@ -28,7 +28,7 @@ GitHub Actions 工作流会构建 `frontend/` 的静态导出。当前网站脚�
 - `NEXT_PUBLIC_API_URL`：工作流中的当前私有 RAG 服务 HTTPS 地址，不要带末尾斜杠。
 - `NEXT_PUBLIC_BASE_PATH`：GitHub Pages 子路径，当前仓库使用 `/Dragon-Legend-RAG`。
 
-Cloudflare 临时域名更换后，启动脚本会更新工作流并触发前端重新部署。手动改动后，在 GitHub Actions 中重新运行 **Deploy frontend to GitHub Pages**。访问密码、模型 API Key、隧道凭据和其他私密信息都不要放进前端代码；`NEXT_PUBLIC_*` 值会公开给浏览器。
+Cloudflare 临时域名更换后，启动脚本会更新工作流并触发前端重新部署。手动改动后，在 GitHub Actions 中重新运行 **Deploy frontend to GitHub Pages**。模型 API Key、隧道凭据和其他私密信息都不要放进前端代码；NEXT_PUBLIC 变量会公开给浏览器。
 
 ## 本地前端开发
 
@@ -45,7 +45,7 @@ NEXT_PUBLIC_BASE_PATH=
 
 新前端使用可恢复的任务接口：
 
-- `POST /api/runs`：创建任务，要求 `X-RAG-Access-Key` 和 `X-LLM-API-Key`。
+- `POST /api/runs`：创建任务，`X-RAG-Access-Key` 与 `X-LLM-API-Key` 使用同一个用户 API Key；该 Key 的哈希用于隔离各自的服务端对话。
 - `GET /api/runs/{run_id}`：读取任务快照。
 - `GET /api/runs/{run_id}/events?after={seq}`：从事件序号续接 SSE。
 - `GET /api/runs/by-request/{client_request_id}`：恢复创建请求响应丢失时的任务。
@@ -59,5 +59,5 @@ NEXT_PUBLIC_BASE_PATH=
 
 - 小说资料、FAISS/BM25 索引和知识图谱仅保存在私有 RAG 项目及本机数据目录。
 - GitHub Pages 是公开静态站点；不要在任何 `NEXT_PUBLIC_*` 变量、前端文件或页面事件中放密钥。
-- 访问密码和模型 Key 默认只存在当前页面内存；只有用户主动勾选“在此设备记住”才保存在该浏览器本地。
+- 登录只需 DeepSeek API Key。用户选择记住后，浏览器本地只保存这一把 Key；旧版保存的双凭据会自动迁移。
 - 本机服务重启会将当时未完成的任务标记为中断，并保留已保存的部分内容；任务不会伪装成成功完成。

@@ -391,8 +391,7 @@ export default function Workspace() {
         tier: selectedTier,
         conversationId,
         clientRequestId: requestId,
-        accessKey: creds.accessKey,
-        llmApiKey: creds.llmApiKey,
+        apiKey: creds.llmApiKey,
       });
       startingRequestsRef.current.delete(requestId);
       updateConversation(conversationId, (current) => ({
@@ -608,8 +607,9 @@ export default function Workspace() {
   }, []);
 
   if (!hydrated || !signedIn) {
-    return <LoginGate error={loginError} onSubmit={(next, remember) => {
+    return <LoginGate error={loginError} onSubmit={(apiKey, remember) => {
       setLoginError("");
+      const next = { accessKey: apiKey, llmApiKey: apiKey };
       if (remember) saveStoredCredentials(next); else clearStoredCredentials();
       setCreds(next);
     }} />;
@@ -679,9 +679,9 @@ export default function Workspace() {
 
       <SettingsDialog
         open={settingsOpen}
-        accessKey={creds?.accessKey ?? ""}
         llmApiKey={creds?.llmApiKey ?? ""}
-        onSave={(next, remember) => {
+        onSave={(apiKey, remember) => {
+          const next = { accessKey: apiKey, llmApiKey: apiKey };
           if (remember) saveStoredCredentials(next); else clearStoredCredentials();
           setCreds(next);
         }}

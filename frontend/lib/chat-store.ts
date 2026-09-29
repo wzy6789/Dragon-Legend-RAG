@@ -4,7 +4,7 @@ import type { Conversation } from "./types";
  * 会话本地持久层（IndexedDB）。
  *
  * 安全边界：这里只存会话内容（标题、消息、来源、档位、时间戳）。
- * 访问密码与 API Key 永远不会写入此处，也不会进入任何浏览器存储。
+ * API Key 由单独的凭据存储管理，不会写进会话记录。
  */
 
 const DB_NAME = "dragon-legend-rag";

@@ -5,28 +5,27 @@ import { EyeIcon, EyeOffIcon } from "./icons";
 
 interface Props {
   /** remember=true 表示在这台电脑上保留登录状态 */
-  onSubmit: (creds: { accessKey: string; llmApiKey: string }, remember: boolean) => void;
-  /** 上次连接失败的原因（例如访问密码错误） */
+  onSubmit: (apiKey: string, remember: boolean) => void;
+  /** 上次连接失败的原因 */
   error?: string;
   busy?: boolean;
 }
 
 export default function LoginGate({ onSubmit, error, busy }: Props) {
-  const [accessKey, setAccessKey] = useState("");
   const [llmApiKey, setLlmApiKey] = useState("");
   const [revealKey, setRevealKey] = useState(false);
-  const [remember, setRemember] = useState(false);
+  const [remember, setRemember] = useState(true);
   const firstRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     firstRef.current?.focus();
   }, []);
 
-  const canSubmit = accessKey.trim().length > 0 && llmApiKey.trim().length > 0 && !busy;
+  const canSubmit = llmApiKey.trim().length > 0 && !busy;
 
   const submit = () => {
     if (!canSubmit) return;
-    onSubmit({ accessKey: accessKey.trim(), llmApiKey: llmApiKey.trim() }, remember);
+    onSubmit(llmApiKey.trim(), remember);
   };
 
   return (
@@ -40,7 +39,7 @@ export default function LoginGate({ onSubmit, error, busy }: Props) {
           </div>
           <p className="mt-3 text-[14px] leading-6 text-ink-muted">完整知识库考据助手</p>
           <p className="mt-1.5 text-[13px] leading-6 text-ink-muted">
-            使用自己的模型额度，连接受保护的完整知识库。
+            使用自己的 DeepSeek API Key，直接连接完整知识库。
           </p>
         </div>
       </div>
@@ -50,30 +49,10 @@ export default function LoginGate({ onSubmit, error, busy }: Props) {
         <div className="w-full max-w-[400px]">
           <h2 className="text-[15px] font-semibold text-ink">连接知识库</h2>
           <p className="mt-1 text-[12px] leading-5 text-ink-muted">
-            填写访问密码与自己的 API Key 后即可开始提问。
+            填写一次 API Key 即可开始提问。默认保存在这台设备，下次打开无需重复输入。
           </p>
 
           <div className="mt-5 space-y-4">
-            <div>
-              <label htmlFor="login-access-key" className="mb-1.5 block text-[12.5px] text-ink-soft">
-                访问密码
-              </label>
-              <input
-                id="login-access-key"
-                ref={firstRef}
-                type="password"
-                value={accessKey}
-                onChange={(e) => setAccessKey(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") submit();
-                }}
-                autoComplete="off"
-                spellCheck={false}
-                placeholder="输入访问密码"
-                className="w-full rounded-[12px] border border-white/[0.08] bg-[#111418] px-3.5 py-2.5 text-[13.5px] text-ink placeholder:text-ink-faint focus:border-gold-500/50 focus:outline-none"
-              />
-            </div>
-
             <div>
               <label htmlFor="login-llm-key" className="mb-1.5 block text-[12.5px] text-ink-soft">
                 DeepSeek API Key
@@ -81,6 +60,7 @@ export default function LoginGate({ onSubmit, error, busy }: Props) {
               <div className="relative">
                 <input
                   id="login-llm-key"
+                  ref={firstRef}
                   type={revealKey ? "text" : "password"}
                   value={llmApiKey}
                   onChange={(e) => setLlmApiKey(e.target.value)}
@@ -112,7 +92,7 @@ export default function LoginGate({ onSubmit, error, busy }: Props) {
               onChange={(e) => setRemember(e.target.checked)}
               className="h-3.5 w-3.5 accent-[#C9A227]"
             />
-            <span>在这台电脑上记住登录，下次无需重复填写</span>
+            <span>在这台设备记住 API Key，下次无需重复填写</span>
           </label>
 
           {error ? (
@@ -137,8 +117,8 @@ export default function LoginGate({ onSubmit, error, busy }: Props) {
 
           <p className="mt-4 text-[11.5px] leading-5 text-ink-faint">
             {remember
-              ? "已选择记住登录：访问密码与 API Key 仅保存在这台电脑的浏览器本地，可在「设置 → 退出当前连接」中清除。"
-              : "未选择记住登录：访问密码与 API Key 仅保存在当前浏览器内存，刷新页面后需重新填写。"}
+              ? "API Key 会保存在这台设备的浏览器本地，可随时在设置中更换或退出。"
+              : "本次不会记住 API Key；刷新或关闭页面后需要重新填写。"}
           </p>
         </div>
       </div>
