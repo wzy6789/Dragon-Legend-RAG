@@ -86,7 +86,7 @@ export default function ModelSelector({
           id={menuId}
           aria-label="选择回答能力"
           onBlur={(event) => {
-            if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOpen(false);
+            if (!ref.current?.contains(event.relatedTarget as Node | null)) setOpen(false);
           }}
           onKeyDown={(event) => {
             const items = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]'));
