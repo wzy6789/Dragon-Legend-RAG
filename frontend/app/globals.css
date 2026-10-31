@@ -22,12 +22,13 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   padding: 9px 16px;
   border: 1px solid rgba(255, 255, 255, .16);
   border-radius: 999px;
-  background: #20242b;
+  background: #111;
   color: #eceff2;
-  font-size: 12px;
+  font-size: 14px;
+  min-height: 40px;
   box-shadow: 0 5px 24px #0005;
 }
-.latest-button:hover { background: #2b3039; }
+.latest-button:hover { background: #1b1b1b; }
 .composer-dock { padding-bottom: max(12px, env(safe-area-inset-bottom)); }
 .conversation-column { max-width: 1120px; }
 @media (min-width: 1600px) {
@@ -42,8 +43,8 @@ body {
 }
 
 body {
-  background-color: #0b0d10;
-  background-image: radial-gradient(ellipse at 70% 0%, rgba(201, 162, 39, 0.055), transparent 34%);
+  background-color: #000;
+  background-image: none;
   color: #f1f3f5;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
@@ -54,7 +55,7 @@ body {
   width: 100vw;
   height: 100dvh;
   overflow: hidden;
-  background: radial-gradient(ellipse at 68% -12%, rgba(201, 162, 39, 0.04), transparent 38%), #0b0d10;
+  background: #000;
 }
 
 .composer-surface {

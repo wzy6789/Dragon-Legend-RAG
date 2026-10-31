@@ -21,12 +21,12 @@ function LiveStatus({ message }: { message: ChatMessage }) {
         ? "初稿生成中 · 内容仍在核验"
         : message.stage || (message.tier === "flash" ? "正在检索并回答" : "正在分析问题与证据");
   return (
-    <div className="flex min-h-7 items-center gap-2 text-[12.5px] text-ink-muted" aria-live="polite">
+    <div className="flex min-h-7 items-center gap-2 text-[14px] text-ink-muted" aria-live="polite">
       <span className="flex items-center gap-1" aria-hidden="true">
         {[0, 1, 2].map((n) => <span key={n} className="h-1.5 w-1.5 animate-dot-pulse rounded-full bg-gold-500" style={{ animationDelay: `${n * 0.16}s` }} />)}
       </span>
       <span>{text}</span>
-      {elapsed >= 2 ? <span className="text-[11px] text-ink-faint">{elapsed}s</span> : null}
+      {elapsed >= 2 ? <span className="text-[13px] text-ink-faint">{elapsed}s</span> : null}
     </div>
   );
 }
@@ -81,12 +81,12 @@ function MessageItemImpl({ message, onRegenerate, onDelete, onInspect }: Props) 
     <article className="group animate-fade-in">
       <div className="answer-heading"><span>{message.experiment?.system_snapshot?.label || message.experiment?.system_id || message.research?.systemId || message.version || "未记录版本"}</span></div>
       {active ? <LiveStatus message={message} /> : null}
-      {message.provisional && message.content ? <div className="mb-2 inline-flex rounded-full border border-gold-500/20 bg-gold-500/[0.07] px-2 py-0.5 text-[10.5px] text-gold-300">待核验草稿</div> : null}
+      {message.provisional && message.content ? <div className="mb-2 inline-flex rounded-full border border-gold-500/20 bg-gold-500/[0.07] px-2 py-0.5 text-[13px] text-gold-300">待核验草稿</div> : null}
       {message.content ? <div className="relative"><Markdown text={message.content} />{message.status === "streaming" ? <span className="ml-0.5 inline-block h-[15px] w-[2px] translate-y-[2px] animate-pulse bg-gold-400 align-baseline" /> : null}</div> : null}
-      {message.status === "stopped" ? <p className="mt-1 text-[12px] text-ink-faint">{message.error || "已停止生成。"}</p> : null}
-      {message.status === "interrupted" ? <p className="mt-1 rounded-xl border border-amber-500/20 bg-amber-500/[0.06] px-3 py-2 text-[12px] leading-5 text-amber-100/80">{message.error || "服务重启导致任务中断，已保留已生成内容。"}</p> : null}
-      {message.status === "error" ? <p className="mt-1.5 rounded-xl border border-red-500/25 bg-red-500/[0.07] px-3 py-2 text-[12px] leading-5 text-red-200/90">{message.error || "生成失败，请重试。"}</p> : null}
-      {message.warning ? <p className="mt-2 rounded-xl border border-amber-500/20 bg-amber-500/[0.05] px-3 py-2 text-[12px] leading-5 text-amber-100/80">{message.warning}{message.completionStatus && message.completionStatus !== "complete" ? `（${message.completionStatus}）` : ""}</p> : null}
+      {message.status === "stopped" ? <p className="mt-1 text-[14px] text-ink-faint">{message.error || "已停止生成。"}</p> : null}
+      {message.status === "interrupted" ? <p className="mt-1 rounded-xl border border-amber-500/20 bg-amber-500/[0.06] px-3 py-2 text-[14px] leading-5 text-amber-100/80">{message.error || "服务重启导致任务中断，已保留已生成内容。"}</p> : null}
+      {message.status === "error" ? <p className="mt-1.5 rounded-xl border border-red-500/25 bg-red-500/[0.07] px-3 py-2 text-[14px] leading-5 text-red-200/90">{message.error || "生成失败，请重试。"}</p> : null}
+      {message.warning ? <p className="mt-2 rounded-xl border border-amber-500/20 bg-amber-500/[0.05] px-3 py-2 text-[14px] leading-5 text-amber-100/80">{message.warning}{message.completionStatus && message.completionStatus !== "complete" ? `（${message.completionStatus}）` : ""}</p> : null}
       {actions}
     </article>
   );

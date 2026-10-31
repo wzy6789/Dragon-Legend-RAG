@@ -31,7 +31,7 @@ export default function HistoryList({
 
   if (conversations.length === 0) {
     return (
-      <p className="px-2.5 py-3 text-[12px] leading-5 text-ink-faint">
+      <p className="px-2.5 py-3 text-[14px] leading-5 text-ink-faint">
         {query ? "没有匹配的对话。" : "还没有对话，开始提问后会出现在这里。"}
       </p>
     );
@@ -48,11 +48,11 @@ export default function HistoryList({
       {groups.map((group) => (
         <div key={group.label}>
           {!collapsed && (
-            <div className="px-2.5 pb-1 pt-1 text-[11px] font-medium tracking-wide text-ink-faint">
+            <div className="px-2.5 pb-1 pt-1 text-[13px] font-medium tracking-wide text-ink-faint">
               {group.label}
             </div>
           )}
-          <ul className="space-y-0.5">
+          <ul className="space-y-2">
             {group.items.map((c) => {
               const active = c.id === activeId;
               const latestAnswer = [...c.messages].reverse().find((message) => message.role === "assistant");
@@ -70,7 +70,7 @@ export default function HistoryList({
                         if (e.key === "Enter") commit(c.id);
                         if (e.key === "Escape") setEditingId(null);
                       }}
-                      className="w-full rounded-lg border border-white/[0.1] bg-[#0E1013] px-2.5 py-1.5 text-[12.5px] text-ink focus:border-gold-500/50 focus:outline-none"
+                      className="w-full rounded-lg border border-white/[0.1] bg-[#0E1013] px-2.5 py-1.5 text-[14px] text-ink focus:border-gold-500/50 focus:outline-none"
                     />
                   </li>
                 );
@@ -87,18 +87,18 @@ export default function HistoryList({
                       type="button"
                       onClick={() => onSelect(c.id)}
                       title={c.title}
-                      className="flex min-w-0 flex-1 flex-col items-start py-1.5 text-left"
+                      className="flex min-w-0 flex-1 flex-col items-start py-3 text-left"
                     >
                       <span
                         className={
-                          "w-full truncate text-[12.5px] " +
+                          "w-full truncate text-[14px] " +
                           (active ? "text-ink" : "text-ink-soft")
                         }
                       >
                         {c.title}
                       </span>
                       {!collapsed && (
-                        <span className="flex w-full items-center gap-1.5 text-[10.5px] text-ink-faint">
+                        <span className="flex w-full items-center gap-1.5 text-[13px] text-ink-faint">
                           {running ? <><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-gold-400" />{status === "queued" ? "排队中" : "回答生成中"}<span className="text-ink-faint/50">·</span></> : null}
                           <span>{formatRelative(c.updatedAt)}</span>
                         </span>
@@ -115,7 +115,7 @@ export default function HistoryList({
                             setEditingId(c.id);
                             setDraft(c.title);
                           }}
-                          className="rounded-md p-1 text-ink-faint hover:bg-white/[0.06] hover:text-ink-soft"
+                          className="rounded-md p-2 text-ink-faint hover:bg-white/[0.06] hover:text-ink-soft"
                         >
                           <PencilIcon className="h-3.5 w-3.5" />
                         </button>
@@ -124,7 +124,7 @@ export default function HistoryList({
                           aria-label="删除"
                           title="删除"
                           onClick={() => onDelete(c.id)}
-                          className="rounded-md p-1 text-ink-faint hover:bg-white/[0.06] hover:text-red-300"
+                          className="rounded-md p-2 text-ink-faint hover:bg-white/[0.06] hover:text-red-300"
                         >
                           <TrashIcon className="h-3.5 w-3.5" />
                         </button>

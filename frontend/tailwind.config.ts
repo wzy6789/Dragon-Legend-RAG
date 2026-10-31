@@ -10,15 +10,15 @@ const config: Config = {
     extend: {
       colors: {
         // 页面底色与面板（干净深色，不做渐变堆叠）
-        base: "#0D0F12",
-        panel: "#15181D",
-        panelAlt: "#1A1E24",
+        base: "#000000",
+        panel: "#0B0B0B",
+        panelAlt: "#141414",
         // 文字
         ink: {
           DEFAULT: "#F1F3F5",
           soft: "#C7CCD3",
-          muted: "#9AA1AA",
-          faint: "#7C838C",
+          muted: "#A8AFB7",
+          faint: "#949CA5",
         },
         // 低饱和金（仅品牌强调）
         gold: {
