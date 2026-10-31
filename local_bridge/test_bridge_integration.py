@@ -80,6 +80,51 @@ class BridgeIntegrationTests(unittest.TestCase):
         self.assertEqual(r['status'],'done');self.assertEqual(observed,['ev2'])
         self.assertEqual(r['sources'][0]['chunk_id'],'ch1')
         self.assertFalse(self.cfg.FLASH_V19_COMPLETE_GUARD)
+
+    def test_selected_legacy_generation_is_not_forced_to_v19(self):
+        b=self.bridge;observed=[]
+        def fake_flash(agent, question, version):
+            observed.append(version)
+            yield b._event('token', {'text':'legacy answer'})
+        with patch.object(b, '_flash', fake_flash):
+            for i,sid in enumerate(('flash-v16','flash-v17-patch2','flash-v18-slot2c')):
+                rid=self.create(tier='flash', system_id=sid, client_request_id='old-'+str(i)).json()['run_id']
+                self.assertEqual(self.wait(rid)['status'],'done')
+        self.assertEqual(observed,['v1.6','v1.7','v1.8'])
+
+    def test_modern_flash_records_actual_model_sources_history_and_selected_revision(self):
+        b=self.bridge;seen=[]
+        def stream(system,question,**kw):
+            seen.append((system['id'],kw))
+            yield 'runtime', {'generation_model':'deepseek-flash','runtime_config':{'model':'deepseek-flash','temperature':.1}}
+            yield 'sources', {'sources':[{'chunk_id':'actual-source','text_full':'完整原文','citation_id':'E1'}], 'retrieval_ms':44}
+            yield 'token', {'text':'现代 Flash 回答'}
+            yield 'diagnostics', {'calls':[{'model':'deepseek-flash'}],'call_count':1}
+            yield 'final', {'use_streamed_answer':True,'text':'','sources':[],'completion_status':'complete'}
+        with patch.object(b._FLASH_RUNTIME,'stream',stream):
+            for i,sid in enumerate(('flash-v20-original','flash-v20','flash-v21-r3','flash-v21','flash-v22-frozen-r1','flash-v22-frozen-r2')):
+                rid=self.create(tier='flash',system_id=sid,client_request_id='modern-'+str(i)).json()['run_id']
+                result=self.wait(rid)
+                self.assertEqual(result['status'],'done')
+                self.assertEqual(result['experiment']['generation_model'],'deepseek-flash')
+                self.assertEqual(result['experiment']['metrics']['call_count'],1)
+                self.assertEqual(result['sources'][0]['text_full'],'完整原文')
+                self.assertEqual(result['experiment']['system_id'],sid)
+                self.assertNotIn('test-owner', str(result))
+        self.assertEqual(seen[0][1]['history'],[])
+        self.assertEqual(seen[1][1]['history'],['一个自由问题'])
+        self.assertEqual(seen[0][1]['api_key'],'test-owner')
+
+    def test_modern_failure_keeps_partial_text_and_is_not_success(self):
+        b=self.bridge
+        def stream(*a,**kw):
+            yield 'token', {'text':'部分回答'}
+            yield 'error', {'message':'output_truncated'}
+        with patch.object(b._FLASH_RUNTIME,'stream',stream):
+            rid=self.create(tier='flash',system_id='flash-v21').json()['run_id']
+            result=self.wait(rid)
+        self.assertEqual(result['status'],'error')
+        self.assertEqual(result['answer'],'部分回答')
     def test_compare_requires_owned_matching_parent_and_freezes_context(self):
         first=self.create().json()['run_id'];self.wait(first)
         res=self.create(client_request_id='second',system_id='max-v31',tier='max',comparison_parent_run_id=first)

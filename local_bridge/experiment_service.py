@@ -463,7 +463,7 @@ class ExperimentService:
             db.execute("INSERT INTO run_experiments(run_id,owner_id,system_id,system_json,request_json,benchmark_id,"
                        "question_id,protocol_id,scoring_json,generation_model,metrics_json,timeline_json,created_at) "
                        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)", (run_id, owner_id, system_id, _json(snapshot), _json(clean_req),
-                       bank, str(qid) if qid is not None else None, protocol, _json(scoring), self._generation_model(),
+                       bank, str(qid) if qid is not None else None, protocol, _json(scoring), snapshot.get('generation_model') or self._generation_model(),
                        _json(metrics), _json([]), now))
             self._insert_evaluation(db, run_id, "pending_generation" if admin_token else "not_authorized", model, protocol, "auto",
                                     {"scorer": scoring["_scorer"]})
@@ -534,6 +534,12 @@ class ExperimentService:
                 if isinstance(messages, list) and not json.loads(row["context_json"]):
                     values["context_json"] = _json(self._clean(messages))
                 public_event = None
+            elif event == "runtime":
+                # Modern Flash uses an explicit transport/config, not the
+                # legacy global provider. Record the route actually executed.
+                values['generation_model'] = self._clean(payload['generation_model'])
+                values['runtime_json'] = _json(self._clean(payload['runtime_config']))
+                public_event = None
             elif event == "diagnostics":
                 diagnostics = self._clean(payload)
                 values["diagnostics_json"] = _json(diagnostics)
@@ -547,8 +553,11 @@ class ExperimentService:
                 if metrics["queue_ms"] is not None:
                     return
                 metrics["queue_ms"] = elapsed
-                values["generation_model"] = self._generation_model()
-                values["runtime_json"] = _json(self._runtime_config())
+                system=json.loads(row['system_json'])
+                settings=system.get('config',{})
+                modern=settings.get('adapter')=='modern_flash'
+                values["generation_model"] = settings['parameters']['model'] if modern else self._generation_model()
+                values["runtime_json"] = _json(settings['parameters'] if modern else self._runtime_config())
             elif event in ("token", "draft_token"):
                 key = "ttft_ms" if event == "token" else "draft_ttft_ms"
                 if not payload.get("text") or metrics[key] is not None:

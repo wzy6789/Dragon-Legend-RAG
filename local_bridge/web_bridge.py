@@ -29,6 +29,9 @@ import config
 from agents import QAAgent
 import experiment_catalog
 import experiment_service
+from flash_runtime import FlashRuntime
+
+_FLASH_RUNTIME = FlashRuntime(experiment_catalog.ROOT)
 
 app = FastAPI(title="Dragon Legend Full RAG Bridge")
 app.add_middleware(
@@ -373,11 +376,11 @@ def _request_runtime(tier: str, user_key: str | None,
         ).strip().lower()
         v19 = tier == "flash" and (
             requested_flash in ("v1.9", "1.9", "v19", "flash_v19")
-            or bool(getattr(config, "FLASH_V19_ENABLED", False))
+            or (not requested_flash and bool(getattr(config, "FLASH_V19_ENABLED", False)))
         )
         v18 = tier == "flash" and (
             requested_flash in ("v1.8", "1.8", "v18", "flash_v18")
-            or bool(getattr(config, "FLASH_V18_ENABLED", False))
+            or (not requested_flash and bool(getattr(config, "FLASH_V18_ENABLED", False)))
         )
         config.KG_ENABLED = bool(tier_config["kg"] or v18 or v19)
         config.PRO_V25_ENABLED = bool(tier_config["v25"])
@@ -497,25 +500,26 @@ def _flash(agent: QAAgent, question: str,
     三条路径都是老协议的裸片段，统一经 _adapt_pieces 转成 SSE。
     """
     ver = resolve_flash_version(version)
+    history = '\n'.join(str(m.get('content', '')) for m in agent.messages if m.get('role') == 'user')
     if ver == "v1.9":
         import flash_v19
         yield _event("stage", {"stage": "证据义务编译"})
-        yield from _adapt_pieces(flash_v19.answer_stream(agent, question))
+        yield from _adapt_pieces(flash_v19.answer_stream(agent, question, history))
         return
     if ver == "v1.8":
         import flash_v18
         yield _event("stage", {"stage": "编译证据反射检索"})
-        yield from _adapt_pieces(flash_v18.answer_stream(agent, question))
+        yield from _adapt_pieces(flash_v18.answer_stream(agent, question, history))
         return
     if ver == "v1.7":
         import flash_v17
         yield _event("stage", {"stage": "槽位规划"})
-        yield from _adapt_pieces(flash_v17.answer_stream(agent, question))
+        yield from _adapt_pieces(flash_v17.answer_stream(agent, question, history))
         return
-    if getattr(config, "FLASH_V16_ENABLED", False):
+    if version or getattr(config, "FLASH_V16_ENABLED", False):
         import flash_v16
         yield _event("stage", {"stage": "极速检索"})
-        yield from _adapt_pieces(flash_v16.answer_stream(agent, question))
+        yield from _adapt_pieces(flash_v16.answer_stream(agent, question, history))
         return
 
     # ---- 旧口径（保留以便对照/回退）----
@@ -687,6 +691,41 @@ def _run_worker(run_id: str) -> None:
         agent._llm_call_metadata = []
         call_offset = 0
         settings = system["config"]
+        if settings.get('adapter') == 'modern_flash':
+            # The website's existing single queue also covers all modern Flash
+            # versions. Legacy /chat requests use the same GPU/config lock.
+            with _llm_lock:
+                experiment_service.started(run_id)
+                history = [str(m.get('content', '')) for m in agent.messages if m.get('role') == 'user']
+                isolated = metadata.get('comparison_parent_run_id') or metadata.get('benchmark_id', 'free') != 'free'
+                session_id = row['owner_id'] + ':' + (run_id if isolated else conversation_id)
+                terminal = None
+                emitter = _TokenEmitter(run_id)
+                try:
+                    for kind, payload in _FLASH_RUNTIME.stream(
+                        system, question, api_key=llm_api_key,
+                        base_url=getattr(config, 'DEEPSEEK_BASE_URL', 'https://api.deepseek.com'),
+                        session_id=session_id, history=history, cancel_event=cancel_event,
+                    ):
+                        if kind == 'token':
+                            emitter(str(payload.get('text', '')))
+                        elif kind in ('runtime', 'diagnostics'):
+                            experiment_service.on_event(run_id, kind, payload)
+                        elif kind in ('error', 'cancelled', 'final'):
+                            terminal = (kind, payload)
+                        else:
+                            emitter.flush()
+                            _publish_run_event(run_id, kind, payload)
+                finally:
+                    emitter.flush()
+                if cancel_event.is_set() or (terminal and terminal[0] == 'cancelled'):
+                    raise agents.WebRunCancelled()
+                if not terminal or terminal[0] != 'final':
+                    raise RuntimeError((terminal or ('error', {}))[1].get('message', 'Missing Flash result'))
+                _publish_run_event(run_id, *terminal)
+                _publish_run_event(run_id, 'done', {'conversation_id': conversation_id, 'version': system['label']})
+                _reload_agent_history(conversation_id, row['owner_id'])
+            return
         with _request_runtime(
             tier,
             llm_api_key,
@@ -697,7 +736,7 @@ def _run_worker(run_id: str) -> None:
             if tier == "flash":
                 answer_emitter = _TokenEmitter(run_id)
                 try:
-                    for frame in _flash(agent, question, "v1.9"):
+                    for frame in _flash(agent, question, settings.get('flash_version')):
                         if cancel_event.is_set():
                             raise agents.WebRunCancelled()
                         decoded = _decode_sse_frame(frame)
@@ -760,6 +799,8 @@ def _run_worker(run_id: str) -> None:
             "conversation_id": conversation_id,
             "version": system["label"],
         })
+        if tier == 'flash':
+            _reload_agent_history(conversation_id, row['owner_id'])
     except agents.WebRunCancelled:
         _publish_run_event(run_id, "cancelled", {"message": "已停止生成。"})
     except Exception as exc:  # noqa: BLE001
@@ -803,20 +844,23 @@ def create_run(
         system = experiment_catalog.resolve_system(req.system_id or experiment_catalog.DEFAULTS[req.tier], req.tier)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
-    system["generation_model"] = str(getattr(config, "LLM_MODEL", "未记录"))
-    system["generation_provider"] = str(getattr(config, "GENERATION_PROVIDER", "未记录"))
-    system["engine_fingerprint"] = experiment_catalog.fingerprint([
+    modern = system['config'].get('adapter') == 'modern_flash'
+    system["generation_model"] = (system['config']['parameters']['model'] if modern else str(getattr(config, "LLM_MODEL", "未记录")))
+    system["generation_provider"] = 'deepseek' if modern else str(getattr(config, "GENERATION_PROVIDER", "未记录"))
+    engine_source = (experiment_catalog.ROOT / system['source'])
+    system["engine_fingerprint"] = system.get('code_fingerprint') if modern else experiment_catalog.fingerprint([
         experiment_catalog.ROOT/"src/agents.py", experiment_catalog.ROOT/"src/vector_store.py",
-        experiment_catalog.ROOT/"src"/("flash_v19.py" if req.tier=="flash" else "pro_v25.py"),
+        engine_source,
         experiment_catalog.ROOT/"src/pro_v31.py"])
     system["bridge_fingerprint"] = hashlib.sha256(b"".join(p.read_bytes() for p in sorted(Path(__file__).parent.glob("*.py")) if not p.name.startswith("test_"))).hexdigest()
-    if req.tier == "flash":
+    if req.tier == "flash" and system['config'].get('flash_version') == 'v1.9':
         import v19_profiles
-        system["config"] = {**system["config"], "variant_flags": v19_profiles.profile_config(system["variant"])}
-    index_dir = Path(getattr(config, "FAISS_DATA_DIR", "."))
+        system["config"] = {**system["config"], "variant_flags": v19_profiles.profile_config(system['config']['flash_profile'])}
+    index_dir = (experiment_catalog.ROOT / 'data' / ('flash20' if system['config']['number']=='20' else 'flash21') / 'resources/faiss_index'
+                 if modern else Path(getattr(config, "FAISS_DATA_DIR", ".")))
     system["index_snapshot"] = {"method":"file-size-mtime", "files":[
-        {"file":p.name,"bytes":p.stat().st_size,"mtime_ns":p.stat().st_mtime_ns}
-        for p in sorted(index_dir.glob("*")) if p.is_file()]}
+        {"file":str(p.relative_to(index_dir)),"bytes":p.stat().st_size,"mtime_ns":p.stat().st_mtime_ns}
+        for p in sorted(index_dir.rglob("*") if modern else index_dir.glob("*")) if p.is_file()]}
     if not llm_api_key or not llm_api_key.strip():
         raise HTTPException(422, "请先填写自己的模型 API Key")
     if not hmac.compare_digest(access_key or "", llm_api_key.strip()):
@@ -1008,6 +1052,7 @@ def delete_run(
         db.execute("DELETE FROM run_events WHERE run_id=?", (run_id,))
         db.execute("DELETE FROM runs WHERE run_id=? AND owner_id=?", (run_id, owner_id))
     _reload_agent_history(conversation_id, owner_id)
+    _FLASH_RUNTIME.forget(owner_id, conversation_id)
     return {"ok": True, "run_id": run_id, "deleted": True}
 
 
@@ -1044,6 +1089,7 @@ def delete_server_conversation(
             (owner_id, conversation_id),
         ).rowcount
     _sessions.pop(owner_id + ":" + conversation_id, None)
+    _FLASH_RUNTIME.forget(owner_id, conversation_id)
     return {"ok": True, "conversation_id": conversation_id, "deleted_runs": deleted}
 
 
@@ -1073,11 +1119,21 @@ def delete_all_server_conversations(
         deleted = db.execute("DELETE FROM runs WHERE owner_id=?", (owner_id,)).rowcount
     for conversation_id in conversation_ids:
         _sessions.pop(owner_id + ":" + conversation_id, None)
+        _FLASH_RUNTIME.forget(owner_id, conversation_id)
     return {"ok": True, "deleted_runs": deleted, "deleted_conversations": len(conversation_ids)}
 
 
 # 预热状态：服务在预热完成前不应被视作 ready
 _WARMUP: dict = {"done": False}
+
+
+@app.on_event('shutdown')
+def _shutdown_flash() -> None:
+    with _RUN_MEMORY_LOCK:
+        for flag in _RUN_CANCEL.values():
+            flag.set()
+    _RUN_EXECUTOR.shutdown(wait=True, cancel_futures=True)
+    _FLASH_RUNTIME.close()
 
 
 @app.on_event("startup")
@@ -1102,6 +1158,7 @@ def _startup_warmup() -> None:
         agent.vector_store.connect()
         agent.vector_store.load_model()
         agent.vector_store.load_reranker()
+        _FLASH_RUNTIME.share_models(agent.vector_store.model, agent.vector_store.reranker)
         import flash_v16
         out = flash_v16.warmup(agent, verbose=True)
         _WARMUP.update(out)
@@ -1141,6 +1198,7 @@ def clear_conversation(
                    (owner_id, conversation_id))
         db.execute("DELETE FROM runs WHERE owner_id=? AND conversation_id=?", (owner_id, conversation_id))
     existed = _sessions.pop(owner_id + ":" + conversation_id, None) is not None
+    _FLASH_RUNTIME.forget(owner_id, conversation_id)
     return {"ok": True, "conversation_id": conversation_id, "existed": existed}
 
 

@@ -6,10 +6,17 @@ import json
 import os
 from functools import lru_cache
 from pathlib import Path
+from flash_runtime import entries as flash_entries
 
 ROOT=Path(os.environ.get('RAG_PROJECT_ROOT','F:/龙王传说智能体'))
 PAPER=Path(os.environ.get('RAG_PAPER_ROOT','F:/rag系统论文'))
 DEFAULTS={'flash':'flash-v19-sem_select','pro':'pro-v25','max':'max-v31'}
+FLASH_REPRESENTATIVES = {
+    'flash-v16', 'flash-v17-patch2', 'flash-v18-slot2c',
+    'flash-v19-sem', 'flash-v19-sem_select',
+    'flash-v20-original', 'flash-v20', 'flash-v21-r3', 'flash-v21',
+    'flash-v22-frozen-r1', 'flash-v22-frozen-r2',
+}
 
 def fingerprint(paths):
     return hashlib.sha256(''.join(str(p.relative_to(ROOT))+':'+hashlib.sha256(p.read_bytes()).hexdigest()
@@ -31,15 +38,24 @@ def systems():
             config=config or {},notes=notes or ('已接线；结果以实际运行记录为准' if status=='runnable' else '尚未完成此入口验证，不替换为其他版本'),
             results=results,code_fingerprint=fingerprint([path]) if path.is_file() else None))
     for n in (16,17,18,19):
-        add(f'flash-v{n}','Flash',f'v1.{n-10}','base',f'src/flash_v{n}.py',['flash'])
-    for variant in ['patch1','patch2']:
-        add('flash-v17-'+variant,'Flash','v1.7',variant,'src/flash_v17.py',['flash'])
-    add('flash-v18-slot2c','Flash','v1.8','slot2c','src/flash_v18.py',['flash'])
+        version=f'v1.{n-10}'
+        add(f'flash-v{n}','Flash',version,'当前保留实现',f'src/flash_v{n}.py',['flash'],'runnable',
+            {'profile':'RAG1','kg':True,'flash_version':version,'flash_profile':'sem_select' if n==19 else None},
+            notes='使用本机保留的该代实现与当前资料；不等同于所有历史批次的原始环境。')
+    add('flash-v17-patch1','Flash','v1.7','patch1','src/flash_v17.py',['flash'],'archive',
+        notes='原 patch1 代码未单独冻结；当前文件已是后续修订，不能冒充原版运行。')
+    add('flash-v17-patch2','Flash','v1.7','patch2','src/flash_v17.py',['flash'],'runnable',
+        {'profile':'RAG1','kg':True,'flash_version':'v1.7'})
+    add('flash-v18-slot2c','Flash','v1.8','slot2c','src/flash_v18.py',['flash'],'runnable',
+        {'profile':'RAG1','kg':True,'flash_version':'v1.8'})
     for variant in ['ev2','plan2','sem','sem_select']:
         add('flash-v19-'+variant,'Flash','v1.9',variant,'src/flash_v19.py',['flash'],'runnable',
             {'profile':'RAG1','kg':True,'flash_version':'v1.9','flash_profile':variant})
-    for n in (20,21,22):
-        add(f'flash-v{n}','Flash',f'v2.{n-20}','base',f'src/flash{n}',['flash'])
+    out.extend(flash_entries(ROOT))
+    for item in out:
+        if item['family']=='Flash' and item['version'].startswith('v'):
+            item['version']='flash-'+item['version'][1:]
+            item['label']=item['version']+' · '+item['variant']
     historic=[('10','v1.0','基础检索'),('11','v1.1','历史'),('12','v1.2','历史'),
         ('13','v1.3','历史'),('14','v1.4','历史'),('15','v1.5','CRAG'),
         ('20','v2.0','Agentic'),('21','v2.1','EWE'),('22','v2.2','章节对齐'),('23','v2.3','扩展支线')]
@@ -65,13 +81,14 @@ def systems():
         data=json.loads(file.read_text(encoding='utf-8'))
         for batch in data.get('batches',[]):
             version=batch['version'];family='Flash' if batch['bank']=='FlashBench' else '历史实验'
-            if any(x['version']==version and x['family']==family for x in out): continue
+            normalized=version if version.startswith('flash-') else 'flash-'+version.removeprefix('v')
+            if any(x['version']==(normalized if family=='Flash' else version) and x['family']==family for x in out): continue
             if family=='Flash' and any(version.replace('-',' ').endswith(x['variant']) and version.startswith(x['version'])
                                         for x in out if x['family']==family): continue
             sid='archive-'+hashlib.sha256((family+version).encode()).hexdigest()[:12]
             if any(x['id']==sid for x in out):continue
             out.append(dict(id=sid,family=family,version=version,variant='记录中的版本身份',label=family+' '+version,
-                tiers=[],source='本地实验清单',status='archive',config={},notes='归档身份；不推断运行配置',
+                tiers=['flash'] if family=='Flash' else [],source='本地实验清单',status='archive',config={},notes='归档身份；不推断运行配置',
                 results=[batch.get('run','')],code_fingerprint=None))
         break
     return out
@@ -86,4 +103,9 @@ def resolve_system(system_id,tier):
 def install(app):
     @app.get('/api/systems')
     def catalogue():
-        return {'systems':systems(),'defaults':DEFAULTS}
+        return {'systems':visible_systems(),'defaults':DEFAULTS}
+
+def visible_systems():
+    # Historical identities remain resolvable for saved runs; the website shows
+    # at most two measured representatives per Flash generation.
+    return [s for s in systems() if s['family'] != 'Flash' or s['id'] in FLASH_REPRESENTATIVES]
