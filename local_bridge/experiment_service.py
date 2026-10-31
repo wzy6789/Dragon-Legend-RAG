@@ -130,6 +130,7 @@ class ExperimentService:
         self._login_windows = {}
         self._clocks = {}
         self._closed = False
+        self._admin_password = os.environ.get("RAG_EXPERIMENT_ADMIN_PASSWORD", "")
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="experiment-judge")
         with bridge._run_db() as db:
             db.executescript("""
@@ -156,7 +157,25 @@ class ExperimentService:
                 );
                 CREATE INDEX IF NOT EXISTS experiment_judge_queue
                     ON experiment_evaluations(status, created_at);
+                CREATE TABLE IF NOT EXISTS experiment_admin_auth (
+                    id INTEGER PRIMARY KEY CHECK(id=1),
+                    password_salt TEXT NOT NULL, password_stamp TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS experiment_admin_sessions (
+                    token_hash TEXT PRIMARY KEY, owner_id TEXT NOT NULL,
+                    password_stamp TEXT NOT NULL, created_at REAL NOT NULL,
+                    expires_at REAL
+                );
             """)
+            db.execute("INSERT OR IGNORE INTO experiment_admin_auth VALUES(1,?, '')", (secrets.token_hex(32),))
+            salt = db.execute("SELECT password_salt FROM experiment_admin_auth WHERE id=1").fetchone()[0]
+            # A salted, slow verifier identifies the startup password without
+            # persisting it. Delete old sessions so reverting a password cannot revive them.
+            self._password_stamp = (hashlib.scrypt(self._admin_password.encode(), salt=bytes.fromhex(salt),
+                                                  n=16384, r=8, p=1).hex() if self._admin_password else "")
+            db.execute("DELETE FROM experiment_admin_sessions WHERE password_stamp<>? OR ?=''",
+                       (self._password_stamp, self._password_stamp))
+            db.execute("UPDATE experiment_admin_auth SET password_stamp=? WHERE id=1", (self._password_stamp,))
             db.execute("UPDATE experiment_evaluations SET status='error',error=?,finished_at=? "
                        "WHERE status='judging'", ("interrupted_judging; explicit rejudge required to avoid duplicate billing", time.time()))
         self._executor.submit(self._drain)
@@ -199,23 +218,37 @@ class ExperimentService:
                     safe.add(name)
         return self._clean({name: getattr(self.config, name) for name in sorted(safe) if hasattr(self.config, name)})
 
+    def _admin_session(self, token):
+        if self._closed or not self._admin_password or not isinstance(token, str) or not token:
+            return None
+        with self._lock, self.bridge._run_db() as db:
+            # The database is authoritative even when another service revoked
+            # the token or changed the configured password since startup.
+            return db.execute("SELECT s.owner_id FROM experiment_admin_sessions s "
+                              "JOIN experiment_admin_auth a ON a.id=1 AND a.password_stamp=s.password_stamp "
+                              "WHERE s.token_hash=? AND s.password_stamp=? "
+                              "AND (s.expires_at IS NULL OR s.expires_at>?)",
+                              (_hash(token), self._password_stamp, time.time())).fetchone()
+
     def authorize_admin(self, token):
-        if not isinstance(token, str) or not token:
-            return False
-        with self._lock:
-            entry = self._tokens.get(_hash(token))
-            if entry and entry[1] > time.monotonic():
-                return True
-            self._tokens.pop(_hash(token), None)
-            return False
+        return self._admin_session(token) is not None
 
     def require_admin_owner(self, token, owner_id):
+        entry = self._admin_session(token)
+        if entry is None or entry["owner_id"] != owner_id:
+            raise HTTPException(403, "管理员令牌无效、已过期或不属于此访问身份")
+
+    def logout(self, token, owner_id):
         with self._lock:
-            if not self.authorize_admin(token) or self._tokens[_hash(token)][0] != owner_id:
-                raise HTTPException(403, "管理员令牌无效、已过期或不属于此访问身份")
+            self.require_admin_owner(token, owner_id)
+            with self.bridge._run_db() as db:
+                db.execute("DELETE FROM experiment_admin_sessions WHERE token_hash=? AND owner_id=?",
+                           (_hash(token), owner_id))
+            self._tokens.pop(_hash(token), None)
+        return {"authorized": False, "authenticated": False}
 
     def login(self, request, owner_id, password):
-        expected = os.environ.get("RAG_EXPERIMENT_ADMIN_PASSWORD", "")
+        expected = self._admin_password
         if not expected:
             raise HTTPException(503, "实验管理员密码未配置")
         ip = request.client.host if request.client else "unknown"
@@ -233,10 +266,15 @@ class ExperimentService:
                 for key in keys:
                     self._login_windows.setdefault(key, []).append(now)
                 raise HTTPException(403, "管理员密码错误")
-            self._tokens = {k: v for k, v in self._tokens.items() if v[1] > now}
             token = secrets.token_urlsafe(36)
-            self._tokens[_hash(token)] = (owner_id, now + 43200, time.time() + 43200)
-        return {"token": token, "authorized": True, "expires_in": 43200, "expires_at": time.time() + 43200}
+            with self.bridge._run_db() as db:
+                inserted = db.execute("INSERT INTO experiment_admin_sessions "
+                    "(token_hash,owner_id,password_stamp,created_at,expires_at) "
+                    "SELECT ?,?,password_stamp,?,NULL FROM experiment_admin_auth WHERE id=1 AND password_stamp=?",
+                    (_hash(token), owner_id, time.time(), self._password_stamp))
+                if inserted.rowcount != 1:
+                    raise HTTPException(503, "管理员密码配置已变更，请重启实验服务")
+        return {"token": token, "authorized": True, "expires_in": None, "expires_at": None}
 
     def _seven(self, identity=None):
         scope = _definitions(self.root / "src/evaluate_7d49.py", (
@@ -875,7 +913,7 @@ def install(app, bridge):
             authorized = True
         except HTTPException:
             authorized = False
-        configured = bool(os.environ.get("RAG_EXPERIMENT_ADMIN_PASSWORD"))
+        configured = bool(service._admin_password)
         return {"enabled": configured, "authorized": authorized,
                 "configured": configured, "authenticated": authorized}
 
@@ -889,6 +927,12 @@ def install(app, bridge):
         if not isinstance(body, dict):
             raise HTTPException(422, "需要 JSON 对象")
         return _current().login(request, owner_id, body.get("password"))
+
+    @app.post("/api/admin/logout")
+    def admin_logout(request: Request, access_key: str | None = Header(None, alias="X-RAG-Access-Key"),
+                     admin_token: str | None = Header(None, alias="X-Experiment-Admin")):
+        owner_id = owner(request, access_key)
+        return _current().logout(admin_token, owner_id)
 
     @app.get("/api/benchmarks")
     def benchmarks():

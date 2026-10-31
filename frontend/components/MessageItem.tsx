@@ -53,33 +53,33 @@ function MessageItemImpl({ message, onRegenerate, onDelete, onInspect }: Props) 
     <div className="mt-3 flex flex-wrap items-center gap-1">
       <button type="button" disabled={!message.content} onClick={() => void copy()} aria-label="复制消息" title={copied ? "已复制" : "复制"} className="message-action disabled:opacity-40">
         {copied ? <CheckIcon className="h-3.5 w-3.5" /> : <CopyIcon className="h-3.5 w-3.5" />}
-        <span>{copied ? "已复制" : "复制"}</span>
+        <span className="sr-only">{copied ? "已复制" : "复制"}</span>
       </button>
       {message.role === "assistant" && onRegenerate && message.status !== "streaming" && message.status !== "queued" && message.status !== "running" && message.status !== "reviewing" ? (
         <button type="button" onClick={() => onRegenerate(message.id)} aria-label="重新生成" title="重新生成" className="message-action">
-          <RefreshIcon className="h-3.5 w-3.5" /><span>重新生成</span>
+          <RefreshIcon className="h-3.5 w-3.5" /><span className="sr-only">重新生成</span>
         </button>
       ) : null}
       {onDelete ? (
         <button type="button" onClick={() => onDelete(message.id)} aria-label="删除消息" title="删除消息" className="message-action hover:!text-red-300">
-          <TrashIcon className="h-3.5 w-3.5" /><span>删除</span>
+          <TrashIcon className="h-3.5 w-3.5" /><span className="sr-only">删除</span>
         </button>
       ) : null}
       {copyError ? <span role="status" className="text-xs text-amber-200">复制失败，请手动选择正文复制</span> : null}
-      {message.role === "assistant" && onInspect && <button type="button" className="message-action" onClick={() => onInspect(message.id)}>实验详情 ↗</button>}
+      {message.role === "assistant" && onInspect && <button type="button" className="message-action" onClick={() => onInspect(message.id)}>详情</button>}
     </div>
   );
 
   if (message.role === "user") {
     return (
-      <div className="group"><span className="eyebrow">QUESTION</span><p className="research-question-text">{message.content}</p>{actions}</div>
+      <div className="group"><p className="research-question-text">{message.content}</p>{actions}</div>
     );
   }
 
   const active = ["queued", "running", "streaming", "reviewing"].includes(message.status ?? "");
   return (
     <article className="group animate-fade-in">
-      <div className="answer-heading"><span>{message.experiment?.system_snapshot?.label || message.experiment?.system_id || message.research?.systemId || message.version || "未记录版本"}</span><span className="status-badge">{message.status ?? "未记录"}</span></div>
+      <div className="answer-heading"><span>{message.experiment?.system_snapshot?.label || message.experiment?.system_id || message.research?.systemId || message.version || "未记录版本"}</span></div>
       {active ? <LiveStatus message={message} /> : null}
       {message.provisional && message.content ? <div className="mb-2 inline-flex rounded-full border border-gold-500/20 bg-gold-500/[0.07] px-2 py-0.5 text-[10.5px] text-gold-300">待核验草稿</div> : null}
       {message.content ? <div className="relative"><Markdown text={message.content} />{message.status === "streaming" ? <span className="ml-0.5 inline-block h-[15px] w-[2px] translate-y-[2px] animate-pulse bg-gold-400 align-baseline" /> : null}</div> : null}

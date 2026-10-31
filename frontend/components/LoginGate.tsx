@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { EyeIcon, EyeOffIcon } from "./icons";
 
 interface Props {
-  /** remember=true 表示在这台电脑上保留登录状态 */
+  /** remember=true 表示在当前浏览器保留登录状态 */
   onSubmit: (apiKey: string, remember: boolean) => void;
   /** 上次连接失败的原因 */
   error?: string;
@@ -14,7 +14,6 @@ interface Props {
 export default function LoginGate({ onSubmit, error, busy }: Props) {
   const [llmApiKey, setLlmApiKey] = useState("");
   const [revealKey, setRevealKey] = useState(false);
-  const [remember, setRemember] = useState(true);
   const firstRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -25,7 +24,7 @@ export default function LoginGate({ onSubmit, error, busy }: Props) {
 
   const submit = () => {
     if (!canSubmit) return;
-    onSubmit(llmApiKey.trim(), remember);
+    onSubmit(llmApiKey.trim(), true);
   };
 
   return (
@@ -49,7 +48,7 @@ export default function LoginGate({ onSubmit, error, busy }: Props) {
         <div className="w-full max-w-[400px]">
           <h2 className="text-[15px] font-semibold text-ink">连接知识库</h2>
           <p className="mt-1 text-[12px] leading-5 text-ink-muted">
-            填写一次 API Key 即可开始提问。默认保存在这台设备，下次打开无需重复输入。
+            填写后自动记住，下次打开无需重复输入。
           </p>
 
           <div className="mt-5 space-y-4">
@@ -85,16 +84,6 @@ export default function LoginGate({ onSubmit, error, busy }: Props) {
             </div>
           </div>
 
-          <label className="mt-4 flex cursor-pointer items-center gap-2 text-[12.5px] text-ink-soft">
-            <input
-              type="checkbox"
-              checked={remember}
-              onChange={(e) => setRemember(e.target.checked)}
-              className="h-3.5 w-3.5 accent-[#C9A227]"
-            />
-            <span>在这台设备记住 API Key，下次无需重复填写</span>
-          </label>
-
           {error ? (
             <p className="mt-4 rounded-[10px] border border-red-500/25 bg-red-500/[0.07] px-3 py-2 text-[12.5px] leading-5 text-red-200/90">
               {error}
@@ -115,11 +104,6 @@ export default function LoginGate({ onSubmit, error, busy }: Props) {
             {busy ? "连接中…" : "进入研究工作台"}
           </button>
 
-          <p className="mt-4 text-[11.5px] leading-5 text-ink-faint">
-            {remember
-              ? "API Key 会保存在这台设备的浏览器本地，可随时在设置中更换或退出。"
-              : "本次不会记住 API Key；刷新或关闭页面后需要重新填写。"}
-          </p>
         </div>
       </div>
     </div>

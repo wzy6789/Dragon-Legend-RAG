@@ -26,12 +26,12 @@ export default function ExperimentInspector(p: Props) {
   const evaluations = e?.evaluations ?? [];
   const evaluation = evaluations.find((item) => item.id === evaluationId) ?? evaluations.at(-1);
   return <>
-    <div className="inspector-heading"><span className="eyebrow">RUN INSPECTOR</span><h2>实验详情</h2><p>生成、评测与交付分别记录</p></div>
+    <div className="inspector-heading"><h2>实验详情</h2></div>
     <div className="inspector-run-select"><label htmlFor="inspect-run">查看回答</label><select id="inspect-run" value={p.selectedId ?? ""} onChange={(event) => p.onSelect(event.target.value)} disabled={!p.messages.length}>{!p.messages.length && <option value="">尚无运行记录</option>}{p.messages.map((message, index) => <option key={message.id} value={message.id}>#{index + 1} · {message.experiment?.system_id ?? message.research?.systemId ?? message.version ?? "未记录版本"} · {message.status ?? "未记录"}</option>)}</select></div>
     <div className="inspector-tabs" role="tablist" aria-label="实验信息">{TABS.map((item) => <button key={item.id} role="tab" id={`tab-${item.id}`} aria-controls="inspector-content" aria-selected={tab === item.id} onClick={() => setTab(item.id)}>{item.label}</button>)}</div>
     <div className="inspector-body" id="inspector-content" role="tabpanel" aria-labelledby={`tab-${tab}`}>
       {p.error && <p className="inline-error" role="status">{p.error}</p>}
-      {!p.message ? <div className="inspector-empty"><span aria-hidden="true">↗</span><h3>选择一次运行</h3><p>回答的配置快照、评分、原文证据与时间线会在这里显示。</p></div> : <>
+      {!p.message ? <div className="inspector-empty"><h3>选择一条回答查看详情</h3></div> : <>
         {tab === "overview" && <>
           <div className="inspector-section"><h3>运行信息</h3><dl><Field label="运行 ID" value={p.message.runId} /><Field label="状态" value={p.message.status} /><Field label="系统版本" value={e?.system_id ?? p.message.research?.systemId} /><Field label="生成模型" value={e?.generation_model} /><Field label="题库" value={e?.benchmark_id === "free" || p.message.research?.benchmarkId === "free" ? "自由问题 · 在线诊断" : e?.benchmark_id ?? p.message.research?.benchmarkId} /><Field label="题目 ID" value={e?.question_id ?? p.message.research?.questionId} /><Field label="评测协议" value={e?.protocol_id ?? p.message.research?.protocolId} /><Field label="答案哈希" value={e?.answer_hash} /></dl></div>
           <div className="inspector-section"><h3>后端计时</h3><div className="metrics-grid">{([['排队', e?.metrics?.queue_ms], ['执行（不含排队）', e?.metrics?.execution_ms], ['首字（含排队）', e?.metrics?.ttft_ms], ['草稿首字（含排队）', e?.metrics?.draft_ttft_ms], ['端到端', e?.metrics?.e2e_ms], ['检索', e?.metrics?.retrieval_ms]] as const).map(([label, value]) => <div key={label}><span>{label}</span><strong>{formatMs(value)}</strong></div>)}</div><p className="muted small">首字与草稿首字从提交开始计时，均包含排队；执行耗时不含排队。</p><dl><Field label="交付模式" value={e?.metrics?.delivery_mode} /></dl></div>

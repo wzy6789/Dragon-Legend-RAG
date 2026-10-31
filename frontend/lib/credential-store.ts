@@ -6,6 +6,31 @@
  */
 
 const STORAGE_KEY = "dragon-legend-rag.login.v1";
+const ADMIN_STORAGE_KEY = "dragon-legend-rag.admin.v1";
+
+export interface StoredAdminSession { token: string; expiresAt: string | number | null }
+
+export function loadStoredAdminSession(): StoredAdminSession | null {
+  try {
+    const raw = safeStorage()?.getItem(ADMIN_STORAGE_KEY);
+    if (!raw) return null;
+    const value = JSON.parse(raw) as StoredAdminSession;
+    if (typeof value.token !== "string" || !value.token) { clearStoredAdminSession(); return null; }
+    if (value.expiresAt != null) {
+      const expires = typeof value.expiresAt === "number" ? value.expiresAt < 1e12 ? value.expiresAt * 1000 : value.expiresAt : Date.parse(value.expiresAt);
+      if (!Number.isFinite(expires) || expires <= Date.now()) { clearStoredAdminSession(); return null; }
+    }
+    return { token: value.token, expiresAt: value.expiresAt ?? null };
+  } catch { return null; }
+}
+
+export function saveStoredAdminSession(value: StoredAdminSession): void {
+  try { safeStorage()?.setItem(ADMIN_STORAGE_KEY, JSON.stringify({ token: value.token, expiresAt: value.expiresAt })); } catch { /* current login still works */ }
+}
+
+export function clearStoredAdminSession(): void {
+  try { safeStorage()?.removeItem(ADMIN_STORAGE_KEY); } catch { /* unavailable storage */ }
+}
 
 export interface StoredCredentials {
   accessKey: string;
@@ -50,6 +75,7 @@ export function saveStoredCredentials(creds: StoredCredentials): void {
 }
 
 export function clearStoredCredentials(): void {
+  clearStoredAdminSession();
   const store = safeStorage();
   if (!store) return;
   try {

@@ -1,9 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { asApiError, cancelRun, createRun, deleteAllServerConversations, deleteRun, deleteServerConversation, fetchHealth, getRun, getRunByRequest, subscribeRun, getSystems, getBenchmarks, getExperiment, getAdminStatus, loginAdmin, evaluateRun } from "@/lib/api";
+import { asApiError, cancelRun, createRun, deleteAllServerConversations, deleteRun, deleteServerConversation, fetchHealth, getRun, getRunByRequest, subscribeRun, getSystems, getBenchmarks, getExperiment, getAdminStatus, loginAdmin, logoutAdmin, evaluateRun } from "@/lib/api";
 import { clearConversations, deleteConversation as deleteConversationRow, listConversations, putConversation } from "@/lib/chat-store";
-import { clearStoredCredentials, loadStoredCredentials, saveStoredCredentials } from "@/lib/credential-store";
+import { clearStoredCredentials, loadStoredCredentials, saveStoredCredentials, loadStoredAdminSession, saveStoredAdminSession, clearStoredAdminSession } from "@/lib/credential-store";
 import { filterConversations, makeTitle } from "@/lib/history";
 import type { ApiError, Benchmark, BenchmarkQuestion, BrowserDelivery, ChatMessage, ComparisonTask, Conversation, ResearchRequest, ResearchSystem, RunEvent, RunSnapshot, SystemRegistry, Tier } from "@/lib/types";
 import { canRunSystem, DEFAULT_SYSTEMS, downloadFile, exportBatch, nextComparisonTask, shouldPollExperiment, withoutCredentials, type ExportFormat } from "@/lib/workbench";
@@ -166,9 +166,12 @@ export default function Workspace() {
 
   useEffect(() => {
     const stored = loadStoredCredentials();
-    if (stored) setCreds(stored);
+    if (stored) {
+      setCreds(stored);
+      const admin = loadStoredAdminSession();
+      if (admin) { setAdminToken(admin.token); setAdminExpires(admin.expiresAt); }
+    }
     try { setCollapsed(localStorage.getItem("dragon-legend.sidebar-collapsed") === "true"); } catch { /* optional preference */ }
-    setEvidenceOpen(window.matchMedia("(min-width: 1200px)").matches);
     setHydrated(true);
   }, []);
 
@@ -227,7 +230,7 @@ export default function Workspace() {
     return () => controller.abort();
   }, [signedIn, registryRefresh]);
 
-  const expireAdmin = useCallback(() => { setAdminToken(""); setAdminExpires(null); setAdminError("管理员会话已过期，请重新登录。"); }, []);
+  const expireAdmin = useCallback(() => { clearStoredAdminSession(); setAdminToken(""); setAdminExpires(null); setAdminError("管理员登录已失效，请重新登录。"); }, []);
 
   useEffect(() => {
     if (!signedIn) return;
@@ -752,12 +755,13 @@ export default function Workspace() {
   }, [activeId, input, createConversation, tier]);
 
   const disconnect = useCallback(() => {
+    if (adminToken && creds) void logoutAdmin(creds.accessKey, adminToken).catch(() => { /* local credentials still cleared */ });
     clearStoredCredentials();
     setCreds(null);
     setAdminToken("");
     setAdminExpires(null);
     setLoginError("");
-  }, []);
+  }, [adminToken, creds]);
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
@@ -784,6 +788,7 @@ export default function Workspace() {
     try {
       const result = await loginAdmin(password, creds.accessKey);
       if (secretsRef.current[0] !== creds.accessKey) return;
+      saveStoredAdminSession({ token: result.token, expiresAt: result.expires_at });
       setAdminToken(result.token); setAdminExpires(result.expires_at); setAdminOpen(false);
     } catch (error) { setAdminError(asApiError(error).message); }
     finally { setAdminBusy(false); }
@@ -841,23 +846,24 @@ export default function Workspace() {
         {notice && <div className="workspace-notice" role="status"><span>{notice}</span><button onClick={() => setNotice("")}>关闭</button></div>}
         {view === "history" && <>
           <div className="experiment-controls">
-            <div className="experiment-controls-heading"><div><span className="eyebrow">EXPERIMENT SETUP</span><h2>运行配置</h2></div><span className="status-badge">{questionSelection ? questionSelection.bank.label : "自由问题 · 在线诊断"}</span></div>
-            <div className="system-controls"><label className="stack-label tier-control">档位<select value={tier} onChange={(event) => handleTierChange(event.target.value as Tier)}><option value="flash">Flash</option><option value="pro">Pro</option><option value="max">Max</option></select></label><label className="stack-label system-control">系统 A<select value={systemId} onChange={(event) => setSystemId(event.target.value)}>{!compatibleSystems.some((system) => system.id === systemId) && <option value={systemId}>{systemId} · 等待注册表</option>}{compatibleSystems.map((system) => <option key={system.id} value={system.id} disabled={!canRunSystem(system, tier)}>{system.label}{system.status !== "runnable" ? ` · ${system.status === "pending" ? "待接入" : "历史归档"}` : ""}</option>)}</select></label><label className="compare-switch"><input type="checkbox" checked={compare} onChange={(event) => setCompare(event.target.checked)} />双系统比较</label></div>
-            {compare && <div className="compare-controls"><label className="stack-label system-control">系统 B · A 完成后运行<select value={compareSystemId} onChange={(event) => setCompareSystemId(event.target.value)}><option value="">选择第二个系统</option>{registry.systems.map((system) => <option key={system.id} value={system.id} disabled={system.status !== "runnable" || system.id === systemId || !system.tiers.some((value) => ["flash", "pro", "max"].includes(value))}>{system.label} · {system.family}{system.status !== "runnable" ? ` · ${system.status}` : ""}</option>)}</select></label><p className="muted">相同问题与协议，顺序运行；两次生成均使用你的 BYOK。</p></div>}
-            <div className="setup-caption"><span>{questionSelection ? `${questionSelection.question.id} · 协议 ${questionSelection.bank.protocol_id || "未记录"}` : "自由问题仅作在线诊断，不计入基准成绩。"}</span><button onClick={() => setView("benchmarks")}>从基准题库选择 ↗</button></div>
+            <div className="system-controls"><label className="stack-label tier-control"><span className="sr-only">档位</span><select aria-label="档位" value={tier} onChange={(event) => handleTierChange(event.target.value as Tier)}><option value="flash">Flash</option><option value="pro">Pro</option><option value="max">Max</option></select></label><label className="stack-label system-control"><span className="sr-only">系统版本</span><select aria-label="系统版本" value={systemId} onChange={(event) => setSystemId(event.target.value)}>{!compatibleSystems.some((system) => system.id === systemId) && <option value={systemId}>{systemId} · 等待注册表</option>}{compatibleSystems.map((system) => <option key={system.id} value={system.id} disabled={!canRunSystem(system, tier)}>{system.label}{system.status !== "runnable" ? ` · ${system.status === "pending" ? "待接入" : "历史归档"}` : ""}</option>)}</select></label><label className="compare-switch"><input type="checkbox" checked={compare} onChange={(event) => setCompare(event.target.checked)} />对比</label><details className="experiment-options"><summary>设置</summary><div className="experiment-options-body">
+            <div className="setup-caption"><span>{questionSelection ? `${questionSelection.bank.label} · ${questionSelection.question.id}` : "自由问题 · 在线诊断"}</span><button onClick={() => setView("benchmarks")}>选择题库</button></div>
             <dl className="setup-metadata" aria-label="配置摘要"><div><dt>档位</dt><dd>{tier.toUpperCase()}</dd></div><div><dt>版本</dt><dd>{selectedSystem?.version || "未记录"}</dd></div><div><dt>变体</dt><dd>{selectedSystem?.variant || "未记录"}</dd></div><div><dt>所选运行模型</dt><dd>{activeAssistant?.experiment?.system_id === systemId ? activeAssistant.experiment.generation_model || "运行时记录" : "运行时记录"}</dd></div><div><dt>协议</dt><dd>{questionSelection?.bank.protocol_id || benchmarks.find((bank) => bank.id === "free")?.protocol_id || "未记录"}</dd></div></dl>
+            </div></details></div>
+            {compare && <div className="compare-controls"><label className="stack-label system-control"><span className="sr-only">第二个系统</span><select aria-label="第二个系统" value={compareSystemId} onChange={(event) => setCompareSystemId(event.target.value)}><option value="">选择第二个系统</option>{registry.systems.map((system) => <option key={system.id} value={system.id} disabled={system.status !== "runnable" || system.id === systemId || !system.tiers.some((value) => ["flash", "pro", "max"].includes(value))}>{system.label} · {system.family}{system.status !== "runnable" ? ` · ${system.status}` : ""}</option>)}</select></label></div>}
+            {questionSelection && <div className="selected-question">{questionSelection.bank.label} · {questionSelection.question.id}</div>}
             {registryError && <p className="inline-error">注册表加载失败：{registryError} <button onClick={() => setRegistryRefresh((value) => value + 1)}>重试</button></p>}
           </div>
-          <div className="thread-toolbar"><span>{active?.messages.filter((message) => message.role === "user").length ?? 0} 个问题 · {assistantMessages.length} 次回答</span><div>{active && <button onClick={() => exportConversation(active, "md")}>导出本批次 ↓</button>}<button onClick={() => setView("reports")}>全部报告 ↗</button></div></div>
+          {!!assistantMessages.length && active && <div className="thread-toolbar"><button onClick={() => exportConversation(active, "md")}>导出对话 ↓</button></div>}
           <ChatView messages={active?.messages ?? []} onPick={() => setView("benchmarks")} onRegenerate={regenerate} onDeleteMessage={deleteMessage} scrollRef={scrollRef} bottomRef={bottomRef} onScroll={onScroll} showLatest={showLatest} onLatest={scrollToLatest} onInspect={(id) => { setSelectedMessageId(id); setEvidenceOpen(true); }} selectedId={activeAssistant?.id} busy={Boolean(activeRun) || comparisonBusy} comparisonPending={comparisonBusy} />
-          <div className="research-composer"><div className="research-composer-input"><textarea ref={inputRef} value={input} rows={3} maxLength={4000} aria-label="输入研究问题" placeholder="输入需要检索、核对或比较的问题…" onChange={(event) => { setInput(event.target.value); if (questionSelection && event.target.value !== questionSelection.question.question) setQuestionSelection(null); }} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); send(); } }} /><div className="composer-actions"><span>{activeRun || comparisonBusy ? "任务在后台继续，切换会话可随时回来。" : `${input.length}/4000 · Enter 运行，Shift + Enter 换行`}</span>{activeRun || comparisonBusy ? <button className="quiet-button" onClick={() => void stopActiveRun()}>停止{comparisonBusy ? "比较" : "运行"}</button> : <button className="primary-button" disabled={!input.trim() || !canSubmit} onClick={send}>{compare ? "顺序比较 A → B" : "运行实验"}<span aria-hidden="true"> ↑</span></button>}</div></div><p className="composer-footnote"><span className={`status-dot ${connection === "ready" ? "ready" : ""}`} />{connectionLabel} · {adminToken ? "管理员评测会话" : "访客模式 · 不发起付费评测"}</p></div>
+          <div className="research-composer"><div className="research-composer-input"><textarea ref={inputRef} value={input} rows={2} maxLength={4000} aria-label="输入研究问题" title="Enter 发送，Shift + Enter 换行" placeholder="输入问题…" onChange={(event) => { setInput(event.target.value); if (questionSelection && event.target.value !== questionSelection.question.question) setQuestionSelection(null); }} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); send(); } }} /><div className="composer-actions"><span>{activeRun || comparisonBusy ? "后台运行中" : input.length >= 3200 ? `${input.length}/4000` : ""}</span>{activeRun || comparisonBusy ? <button className="quiet-button" onClick={() => void stopActiveRun()}>停止</button> : <button className="primary-button" disabled={!input.trim() || !canSubmit} onClick={send}>{compare ? "开始对比" : "发送"}<span aria-hidden="true"> ↑</span></button>}</div></div></div>
         </>}
         {view === "versions" && <VersionsPanel systems={registry.systems} error={registryError} onRetry={() => setRegistryRefresh((value) => value + 1)} onUse={(system: ResearchSystem) => { const selectedTier = system.tiers.find((value): value is Tier => ["flash", "pro", "max"].includes(value)); if (!selectedTier) return; handleTierChange(selectedTier); setSystemId(system.id); setView("history"); }} />}
         {view === "benchmarks" && <BenchmarksPanel benchmarks={benchmarks} onPick={pickQuestion} error={benchmarkError} />}
         {view === "reports" && <ReportsPanel conversations={conversations} onExport={exportConversation} onSelect={selectConversation} accessKey={creds.accessKey} adminToken={adminToken} onLogin={() => setAdminOpen(true)} onAdminExpired={expireAdmin} />}
       </WorkbenchShell>
 
-      <AdminDialog open={adminOpen} authenticated={Boolean(adminToken)} configured={adminConfigured} busy={adminBusy} error={adminError} onLogin={(password) => void signInAdmin(password)} onLogout={() => { setAdminToken(""); setAdminExpires(null); setAdminError(""); }} onClose={() => setAdminOpen(false)} />
+      <AdminDialog open={adminOpen} authenticated={Boolean(adminToken)} configured={adminConfigured} busy={adminBusy} error={adminError} onLogin={(password) => void signInAdmin(password)} onLogout={() => { if (creds && adminToken) void logoutAdmin(creds.accessKey, adminToken).catch(() => setNotice("当前浏览器已退出；服务端会话暂未撤销，请恢复连接后重试。")); clearStoredAdminSession(); setAdminToken(""); setAdminExpires(null); setAdminError(""); }} onClose={() => setAdminOpen(false)} />
 
       <SettingsDialog
         open={settingsOpen}
@@ -866,7 +872,11 @@ export default function Workspace() {
           const next = { accessKey: apiKey, llmApiKey: apiKey };
           if (remember) saveStoredCredentials(next); else clearStoredCredentials();
           setCreds(next);
-          setAdminToken(""); setAdminExpires(null);
+          if (apiKey !== creds?.accessKey) {
+            if (creds && adminToken) void logoutAdmin(creds.accessKey, adminToken).catch(() => { /* clear this browser regardless */ });
+            clearStoredAdminSession();
+            setAdminToken(""); setAdminExpires(null);
+          }
         }}
         onDisconnect={disconnect}
         onClose={() => setSettingsOpen(false)}

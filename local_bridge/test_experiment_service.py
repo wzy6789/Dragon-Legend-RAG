@@ -187,7 +187,7 @@ class ExperimentServiceTests(unittest.TestCase):
     def latest(self, run_id="r1"):
         return E.get_experiment(run_id)["evaluations"][-1]
 
-    def test_login_is_owner_bound_expires_and_rate_limits(self):
+    def test_login_is_owner_bound_persistent_and_rate_limits(self):
         token = self.login()
         self.assertTrue(E.authorize_admin(token))
         other = {"X-RAG-Access-Key": "other-owner", "X-Experiment-Admin": token}
@@ -199,10 +199,119 @@ class ExperimentServiceTests(unittest.TestCase):
             self.make_run(token="invalid-token")
         self.assertEqual(caught.exception.status_code, 403)
         with patch.object(E.time, "monotonic", return_value=time.monotonic() + 43201):
-            self.assertFalse(E.authorize_admin(token))
+            self.assertTrue(E.authorize_admin(token))
         codes = [self.client.post("/api/admin/login", headers=self.headers,
                                  json={"password": "wrong"}).status_code for _ in range(8)]
         self.assertIn(429, codes)
+
+    def test_admin_session_survives_service_and_browser_restart_without_paid_calls(self):
+        token = self.login()
+        self.make_run()
+        before = E.get_experiment("r1")
+        self.client.close()
+        self.service.close()
+        with patch.object(E.ExperimentService, "_make_client") as paid_client:
+            self.service = E.initialize(self.bridge)
+            with TestClient(self.app) as restored_client:
+                response = restored_client.get("/api/admin/status", headers={
+                    **self.headers, "X-Experiment-Admin": token})
+                self.assertTrue(response.json()["authenticated"])
+                response = restored_client.get("/api/admin/status", headers={
+                    "X-RAG-Access-Key": "other-owner", "X-Experiment-Admin": token})
+                self.assertFalse(response.json()["authenticated"])
+                with self.assertRaises(HTTPException) as caught:
+                    self.service.require_admin_owner(token, self.bridge._owner_id("other-owner"))
+                self.assertEqual(caught.exception.status_code, 403)
+                self.idle()
+            paid_client.assert_not_called()
+        self.assertEqual(E.get_experiment("r1"), before)
+
+    def test_admin_session_storage_contains_no_raw_credentials(self):
+        response = self.client.post("/api/admin/login", headers=self.headers,
+                                    json={"password": "test-admin-password"})
+        self.assertEqual(response.status_code, 200)
+        login = response.json()
+        self.assertIsNone(login["expires_at"])
+        self.assertIsNone(login["expires_in"])
+        with self.bridge._run_db() as db:
+            row = db.execute("SELECT * FROM experiment_admin_sessions").fetchone()
+            dump = "\n".join(db.iterdump())
+        self.assertEqual(row["token_hash"], hashlib.sha256(login["token"].encode()).hexdigest())
+        self.assertEqual(row["owner_id"], self.owner)
+        self.assertIsNone(row["expires_at"])
+        for raw in (login["token"], "test-admin-password", self.key):
+            self.assertNotIn(raw, dump)
+
+    def test_admin_validation_uses_database_instead_of_memory_cache(self):
+        token = self.login()
+        self.service._tokens.clear()
+        self.assertTrue(E.authorize_admin(token))
+        forged = "cache-only-token"
+        self.service._tokens[E._hash(forged)] = (self.owner, time.monotonic() + 43200, time.time() + 43200)
+        self.assertFalse(E.authorize_admin(forged))
+        with self.bridge._run_db() as db:
+            db.execute("DELETE FROM experiment_admin_sessions WHERE token_hash=?", (E._hash(token),))
+        self.assertFalse(E.authorize_admin(token))
+
+    def test_admin_password_change_on_restart_invalidates_previous_sessions(self):
+        token = self.login()
+        with patch.dict(os.environ, {"RAG_EXPERIMENT_ADMIN_PASSWORD": "rotated-test-password"}):
+            # Environment changes are applied when a fresh service is initialized.
+            self.assertTrue(E.authorize_admin(token))
+            self.service.close()
+            self.service = E.initialize(self.bridge)
+            self.assertFalse(E.authorize_admin(token))
+            self.assertEqual(self.client.post("/api/admin/login", headers=self.headers,
+                json={"password": "test-admin-password"}).status_code, 403)
+            response = self.client.post("/api/admin/login", headers=self.headers,
+                                       json={"password": "rotated-test-password"})
+            self.assertEqual(response.status_code, 200)
+            self.assertTrue(E.authorize_admin(response.json()["token"]))
+        self.service.close()
+        self.service = E.initialize(self.bridge)
+        self.assertFalse(E.authorize_admin(token), "changing a password back must not revive old sessions")
+        self.assertFalse(E.authorize_admin(response.json()["token"]))
+
+    def test_admin_password_removal_disables_persisted_sessions(self):
+        token = self.login()
+        with patch.dict(os.environ, {"RAG_EXPERIMENT_ADMIN_PASSWORD": ""}):
+            self.service.close()
+            self.service = E.initialize(self.bridge)
+            self.assertFalse(E.authorize_admin(token))
+            status = self.client.get("/api/admin/status", headers={
+                **self.headers, "X-Experiment-Admin": token}).json()
+            self.assertFalse(status["configured"])
+            self.assertFalse(status["authenticated"])
+            self.assertEqual(self.client.post("/api/admin/login", headers=self.headers,
+                json={"password": "test-admin-password"}).status_code, 503)
+
+    def test_admin_logout_requires_owner_and_revokes_only_its_token_durably(self):
+        token, other_token = self.login(), self.login()
+        self.assertEqual(self.client.post("/api/admin/logout", headers={
+            "X-Experiment-Admin": token}).status_code, 401)
+        self.assertEqual(self.client.post("/api/admin/logout", headers=self.headers).status_code, 403)
+        self.assertEqual(self.client.post("/api/admin/logout", headers={
+            "X-RAG-Access-Key": "other-owner", "X-Experiment-Admin": token}).status_code, 403)
+        self.assertTrue(E.authorize_admin(token))
+        response = self.client.post("/api/admin/logout", headers={
+            **self.headers, "X-Experiment-Admin": token})
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json()["authorized"])
+        self.assertFalse(E.authorize_admin(token))
+        self.assertTrue(E.authorize_admin(other_token))
+        self.service.close()
+        self.service = E.initialize(self.bridge)
+        self.assertFalse(E.authorize_admin(token))
+        self.assertTrue(E.authorize_admin(other_token))
+
+    def test_admin_session_honors_explicit_database_expiry(self):
+        token = self.login()
+        with self.bridge._run_db() as db:
+            db.execute("UPDATE experiment_admin_sessions SET expires_at=?", (time.time() + 3600,))
+        self.assertTrue(E.authorize_admin(token))
+        with self.bridge._run_db() as db:
+            db.execute("UPDATE experiment_admin_sessions SET expires_at=?", (time.time() - 1,))
+        self.assertFalse(E.authorize_admin(token))
 
     def test_routes_enforce_run_owner_and_admin_owner(self):
         token = self.login()

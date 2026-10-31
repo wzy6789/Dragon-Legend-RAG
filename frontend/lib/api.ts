@@ -241,12 +241,17 @@ export function getAdminStatus(adminToken?: string, accessKey?: string, signal?:
   return researchGet("/api/admin/status", accessKey, adminToken, signal);
 }
 
-export async function loginAdmin(password: string, accessKey: string): Promise<{ token: string; expires_at: string | number }> {
+export async function loginAdmin(password: string, accessKey: string): Promise<{ token: string; expires_at: string | number | null }> {
   const response = await fetch(`${API_BASE}/api/admin/login`, {
     method: "POST", cache: "no-store", headers: { "Content-Type": "application/json", ...authHeaders(accessKey) }, body: JSON.stringify({ password }),
   });
   if (!response.ok) await throwResponseError(response);
   return await response.json();
+}
+
+export async function logoutAdmin(accessKey: string, adminToken: string): Promise<void> {
+  const response = await fetch(`${API_BASE}/api/admin/logout`, { method: "POST", cache: "no-store", headers: { ...authHeaders(accessKey), "X-Experiment-Admin": adminToken } });
+  if (!response.ok) await throwResponseError(response);
 }
 
 export async function evaluateRun(runId: string, accessKey: string, adminToken: string): Promise<unknown> {
