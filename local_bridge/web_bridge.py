@@ -74,6 +74,7 @@ _RUN_API_KEYS: dict[str, str] = {}
 _RUN_FUTURES: dict[str, Future] = {}
 _RUN_CANCEL: dict[str, threading.Event] = {}
 _RUN_MEMORY_LOCK = threading.RLock()
+_RUN_EVENTS_CHANGED = threading.Condition()
 _MAX_PENDING_RUNS = 8
 
 # The web tiers are intentionally product-facing names, while the underlying
@@ -230,6 +231,8 @@ def _publish_run_event(run_id: str, event_type: str, payload: dict) -> int:
         )
         db.commit()
     experiment_service.on_event(run_id, event_type, payload)
+    with _RUN_EVENTS_CHANGED:
+        _RUN_EVENTS_CHANGED.notify_all()
     return seq
 
 
@@ -629,16 +632,22 @@ class _TokenEmitter:
         self.run_id = run_id
         self.threshold = threshold
         self.buffer = ""
+        self.sent = False
+        self.last_flush = time.monotonic()
 
     def __call__(self, text: str) -> None:
+        if not text:
+            return
         self.buffer += text
-        if len(self.buffer) >= self.threshold:
+        if not self.sent or len(self.buffer) >= self.threshold or time.monotonic() - self.last_flush >= .05:
             self.flush()
 
     def flush(self) -> None:
         if self.buffer:
             _publish_run_event(self.run_id, "token", {"text": self.buffer})
             self.buffer = ""
+            self.sent = True
+            self.last_flush = time.monotonic()
 
 
 def _stage_for_call(call_label: str) -> str:
@@ -711,7 +720,7 @@ def _run_worker(run_id: str) -> None:
                     ):
                         if kind == 'token':
                             emitter(str(payload.get('text', '')))
-                        elif kind in ('runtime', 'diagnostics'):
+                        elif kind in ('runtime', 'diagnostics', 'latency'):
                             experiment_service.on_event(run_id, kind, payload)
                         elif kind in ('error', 'cancelled', 'final'):
                             terminal = (kind, payload)
@@ -840,6 +849,7 @@ def health() -> dict:
         "tiers": {tier: item["version"] for tier, item in _TIER_PROFILES.items()},
         "warmed_up": _WARMUP.get("done", False),
         "warmup_ms": _WARMUP.get("total"),
+        "flash_prepared": list((_WARMUP.get('modern_flash') or {}).get('versions_ms', {})),
     }
 
 
@@ -990,13 +1000,18 @@ def stream_run_events(
         last_ping = time.monotonic()
         terminal = {"done", "error", "stopped", "interrupted"}
         while True:
-            with _run_db() as db:
-                rows = db.execute(
-                    "SELECT seq,event_type,payload_json FROM run_events "
-                    "WHERE run_id=? AND seq>? ORDER BY seq LIMIT 200",
-                    (run_id, cursor),
-                ).fetchall()
-                run = db.execute("SELECT status FROM runs WHERE run_id=?", (run_id,)).fetchone()
+            # Check under the notification lock so an event cannot arrive
+            # between the empty read and waiting. Yield outside this lock.
+            with _RUN_EVENTS_CHANGED:
+                with _run_db() as db:
+                    rows = db.execute(
+                        "SELECT seq,event_type,payload_json FROM run_events "
+                        "WHERE run_id=? AND seq>? ORDER BY seq LIMIT 200",
+                        (run_id, cursor),
+                    ).fetchall()
+                    run = db.execute("SELECT status FROM runs WHERE run_id=?", (run_id,)).fetchone()
+                if not rows and run is not None and run['status'] not in terminal:
+                    _RUN_EVENTS_CHANGED.wait(timeout=1.0)
             for row in rows:
                 cursor = int(row["seq"])
                 yield (f"id: {cursor}\nevent: {row['event_type']}\ndata: "
@@ -1008,7 +1023,6 @@ def stream_run_events(
                 if now - last_ping >= 10:
                     yield ": keepalive\n\n"
                     last_ping = now
-                time.sleep(0.25)
 
     return StreamingResponse(
         generate(), media_type="text/event-stream",
@@ -1194,6 +1208,9 @@ def _startup_warmup() -> None:
         v19 = flash_v19.warmup(agent)
         _WARMUP["flash_v19"] = v19
         print(f"[STARTUP] Flash v1.9 {v19_profiles.active_profile()} 资源预热完成：{v19}", flush=True)
+        _WARMUP['modern_flash'] = _FLASH_RUNTIME.prewarm(experiment_catalog.visible_systems(),
+            getattr(config, 'DEEPSEEK_BASE_URL', 'https://api.deepseek.com'))
+        print(f"[STARTUP] Flash 2.x 本地预热完成：{_WARMUP['modern_flash']}", flush=True)
     except Exception as exc:  # noqa: BLE001
         print(f"[STARTUP] 预热异常：{type(exc).__name__}: {exc}", flush=True)
         _WARMUP["error"] = type(exc).__name__

@@ -77,6 +77,10 @@ export interface Experiment {
     draft_ttft_ms?: number | null;
     e2e_ms?: number | null;
     retrieval_ms?: number | null;
+    initialization_ms?: number | null;
+    client_prepare_ms?: number | null;
+    engine_first_token_ms?: number | null;
+    model_first_token_ms?: number | null;
     delivery_mode?: string | null;
   } | null;
   timeline?: { event: string; at_ms: number; stage?: string }[];

@@ -5,20 +5,30 @@ from pathlib import Path
 from types import SimpleNamespace
 import threading
 import importlib
+import asyncio
+import sys
+import tempfile
 import unittest
 from unittest.mock import patch
 
 from experiment_catalog import ROOT, visible_systems
-from flash_runtime import FlashRuntime, modules, public_source
+from flash_runtime import FlashRuntime, RequestTransport, modules, public_source
+sys.path.insert(0,str(ROOT))
+from src.flash21.generation import Generator as RealGenerator
 
 
 @dataclass
 class Config:
     model: str = 'deepseek-flash'
+    queue_capacity: int = 16
 
 
 class Transport:
-    def __init__(self, key, base): self.key, self.base = key, base
+    def __init__(self, base='https://invalid.test'): self.key, self.base = '', base
+    async def prepare(self): pass
+    async def bind(self, key, base): self.key,self.base=key,base
+    async def release(self): self.key=''
+    async def aclose(self): await self.release()
 
 
 class Generator:
@@ -100,7 +110,9 @@ class FlashRuntimeTests(unittest.TestCase):
 
     def make_runtime(self,status='ok'):
         engine=Engine(status)
-        row={'engine':engine,'histories':OrderedDict(),'turn':0,
+        transport=Transport();generator=RealGenerator(transport,Config())
+        self.addCleanup(generator.close);engine.generator=generator
+        row={'engine':engine,'histories':OrderedDict(),'turn':0,'generator':generator,'transport':transport,
              'modules':{'config':Config(), 'task':lambda q,**kw:SimpleNamespace(question=q,**kw),
                         'generation':SimpleNamespace(OpenAITransport=Transport,Generator=Generator)}}
         runtime=FlashRuntime(ROOT)
@@ -111,7 +123,7 @@ class FlashRuntimeTests(unittest.TestCase):
         return list(runtime.stream({'id':'flash-test'},'问题',api_key='private-key',base_url='https://invalid.test',
                                    session_id='owner:chat',history=kw.pop('history',[]),cancel_event=kw.pop('cancel',threading.Event())))
 
-    def test_success_retains_sources_counters_and_closes_byok_client(self):
+    def test_success_retains_sources_counters_and_clears_byok_key(self):
         runtime,row=self.make_runtime()
         events=self.call(runtime)
         data=dict(events)
@@ -120,8 +132,10 @@ class FlashRuntimeTests(unittest.TestCase):
         self.assertEqual(data['diagnostics']['call_count'],1)
         self.assertEqual(data['diagnostics']['calls'][0]['usage']['total_tokens'],17)
         self.assertIn('final',data)
-        self.assertTrue(Generator.instances[-1].closed)
-        self.assertIsNone(row['engine'].generator)
+        self.assertFalse(row['generator']._closed)
+        self.assertEqual(row['transport'].key,'')
+        self.assertIs(row['engine'].generator,row['generator'])
+        self.assertEqual(data['latency']['engine_first_token_ms'],33)
         self.assertNotIn('private-key',str(events))
 
     def test_failure_or_cancel_never_yields_success(self):
@@ -130,7 +144,7 @@ class FlashRuntimeTests(unittest.TestCase):
             events=dict(self.call(runtime))
             self.assertNotIn('final',events)
             self.assertIn('cancelled' if status=='cancelled' else 'error',events)
-            self.assertTrue(Generator.instances[-1].closed)
+            self.assertEqual(row['transport'].key,'')
         runtime,_=self.make_runtime()
         cancel=threading.Event();cancel.set()
         self.assertEqual(self.call(runtime,cancel=cancel),[('cancelled',{})])
@@ -141,8 +155,8 @@ class FlashRuntimeTests(unittest.TestCase):
                               session_id='o:c',history=[],cancel_event=threading.Event())
         next(stream)
         stream.close()
-        self.assertTrue(Generator.instances[-1].closed)
-        self.assertIsNone(row['engine'].generator)
+        self.assertEqual(row['transport'].key,'')
+        self.assertFalse(row['generator']._closed)
 
     def test_history_change_invalidates_stale_event_memory(self):
         runtime,row=self.make_runtime()
@@ -153,6 +167,78 @@ class FlashRuntimeTests(unittest.TestCase):
         self.call(runtime,history=['改过的前文'])
         self.assertNotIn(('web','owner:chat'),row['engine']._sessions)
         self.assertEqual(row['engine'].tasks[-1].user_history,('改过的前文',))
+
+    def test_prewarm_retains_all_six_and_shares_only_identical_resource_packages(self):
+        systems=[s for s in visible_systems() if s['config'].get('adapter')=='modern_flash']
+        with tempfile.TemporaryDirectory() as folder:
+            source=Path(folder)/'resources.py';source.write_text('synthetic resource package',encoding='utf8')
+            loads=[]
+            class Backend:
+                names=();encoder=object();ranker=object()
+                def warmup(self): pass
+                def prime_kernels(self,gpu): pass
+            def load(root): loads.append(root);return Backend()
+            m={'resources':SimpleNamespace(__file__=str(source),load_backend=load),'config':Config(),
+               'scheduler':SimpleNamespace(GpuScheduler=lambda n:SimpleNamespace(close=lambda:None)),
+               'generation':SimpleNamespace(Generator=RealGenerator),
+               'retriever':lambda b,g,c:b,'engine':lambda r,g,n,c:SimpleNamespace(generator=g)}
+            runtime=FlashRuntime(ROOT)
+            try:
+                with patch('flash_runtime.modules',return_value=m),patch('flash_runtime.RequestTransport',Transport):
+                    report=runtime.prewarm(systems,'https://invalid.test')
+                    originals={s['id']:runtime._runtime(s) for s in systems}
+                    self.assertEqual(len(runtime._runtimes),6)
+                    self.assertEqual(len(loads),2) # two independent data families
+                    self.assertEqual(report['remote_calls'],0)
+                    for s in reversed(systems):self.assertIs(runtime._runtime(s),originals[s['id']])
+                    self.assertTrue(all(not r['transport'].key for r in runtime._runtimes.values()))
+            finally: runtime.close()
+
+
+class RequestTransportTests(unittest.IsolatedAsyncioTestCase):
+    async def test_preparation_is_free_and_authorization_does_not_cross_requests(self):
+        import httpx
+        seen=[]
+        def handler(request):
+            seen.append(request.headers.get('authorization'))
+            return httpx.Response(200,headers={'content-type':'text/event-stream'},content=
+                b'data: {"id":"fixture","object":"chat.completion.chunk","created":0,"model":"fake","choices":[{"index":0,"delta":{"content":"ok"},"finish_reason":null}]}\n\ndata: [DONE]\n\n')
+        transport=RequestTransport('https://invalid.test',httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+        try:
+            await transport.prepare();client=transport.client
+            self.assertEqual(seen,[]);self.assertEqual(client.api_key,'')
+            for key in ('owner-a','owner-b'):
+                await transport.bind(key,'https://invalid.test')
+                chunks=[c async for c in transport.stream({'model':'fake','messages':[],'stream':True},2)]
+                self.assertEqual(chunks[0]['choices'][0]['delta']['content'],'ok')
+                await transport.release()
+                self.assertIs(client,transport.client)
+                self.assertEqual(client.api_key,'');self.assertEqual(transport._key,'')
+            self.assertEqual(seen,['Bearer owner-a','Bearer owner-b'])
+            with self.assertRaises(RuntimeError):
+                await anext(transport.stream({'model':'fake','messages':[],'stream':True},2))
+            self.assertEqual(len(seen),2)
+        finally: await transport.aclose()
+
+    async def test_cancel_drains_old_request_before_new_credentials_can_bind(self):
+        import httpx
+        started=asyncio.Event();seen=[]
+        async def handler(request):
+            seen.append(request.headers.get('authorization'))
+            if len(seen)==1:
+                started.set();await asyncio.Event().wait()
+            return httpx.Response(200,headers={'content-type':'text/event-stream'},content=b'data: [DONE]\n\n')
+        transport=RequestTransport('https://invalid.test',httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+        async def consume():return [x async for x in transport.stream({'model':'fake','messages':[],'stream':True},10)]
+        try:
+            await transport.bind('owner-a','https://invalid.test')
+            task=asyncio.create_task(consume());await asyncio.wait_for(started.wait(),2)
+            await transport.release()
+            self.assertTrue(task.cancelled());self.assertFalse(transport._active)
+            self.assertEqual(transport.client.api_key,'')
+            await transport.bind('owner-b','https://invalid.test');await consume();await transport.release()
+            self.assertEqual(seen,['Bearer owner-a','Bearer owner-b'])
+        finally:await transport.aclose()
 
 
 if __name__=='__main__': unittest.main()

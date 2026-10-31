@@ -3,12 +3,14 @@ from __future__ import annotations
 
 from collections import OrderedDict
 from dataclasses import asdict
+import asyncio
 import hashlib
 import importlib
 import json
 from pathlib import Path
 import sys
 import threading
+import time
 import types
 
 # id, generation, caption, source package, config manifest, rebased
@@ -91,13 +93,77 @@ class _RankerView:
         return self.ranker.predict(pairs, processing_kwargs={'text': {'max_length': 512, 'truncation': True}}, **kwargs)
 
 
+class RequestTransport:
+    """Persistent connection pool; request credentials are bound only while in use."""
+    def __init__(self, base_url, http_client=None):
+        self.base_url = base_url
+        self.http_client = http_client
+        self.client = None
+        self._key = ''
+        self._active = set()
+
+    async def prepare(self):
+        if self.client is None:
+            from openai import AsyncOpenAI
+            self.client = AsyncOpenAI(api_key='unbound', base_url=self.base_url, max_retries=0,
+                                      **({'http_client': self.http_client} if self.http_client else {}))
+            self.client.api_key = ''
+
+    async def bind(self, api_key, base_url):
+        if not api_key:
+            raise ValueError('A request API key is required')
+        if self._key or self._active:
+            raise RuntimeError('Previous request has not released its transport')
+        if self.base_url != base_url:
+            await self.aclose()
+            self.base_url = base_url
+        await self.prepare()
+        self._key = api_key
+        self.client.api_key = api_key
+
+    async def stream(self, payload, timeout):
+        if not self._key:
+            raise RuntimeError('Transport is not bound to a request')
+        task = asyncio.current_task()
+        self._active.add(task)
+        try:
+            response = await self.client.chat.completions.create(**payload, timeout=timeout)
+            try:
+                async for chunk in response:
+                    yield chunk.model_dump()
+            finally:
+                await response.close()
+        finally:
+            self._active.discard(task)
+
+    async def release(self):
+        try:
+            pending = list(self._active)
+            for task in pending:
+                task.cancel()
+            if pending:
+                await asyncio.gather(*pending, return_exceptions=True)
+        finally:
+            self._key = ''
+            if self.client is not None:
+                self.client.api_key = ''
+
+    async def aclose(self):
+        await self.release()
+        if self.client is not None:
+            await self.client.close()
+            self.client = None
+
+
 class FlashRuntime:
-    """Two CPU runtime slots, one shared modern model pair, per-request BYOK."""
+    """Six fixed runtimes, shared immutable resources, and request-scoped BYOK."""
     def __init__(self, root):
         self.root = Path(root)
         self._lock = threading.RLock()
         self._runtimes = OrderedDict()
+        self._backends = {}
         self._models = None
+        self._base_url = 'https://api.deepseek.com'
 
     def share_models(self, encoder, ranker):
         # The workstation has one GPU: reuse the already warmed legacy weights.
@@ -110,34 +176,62 @@ class FlashRuntime:
         if sid in self._runtimes:
             self._runtimes.move_to_end(sid)
             return self._runtimes[sid]
+        if sid not in {v[0] for v in VERSIONS}:
+            raise ValueError('Unregistered Flash runtime')
         settings = system['config']
         m = modules(self.root, settings)
         cfg = m['config']
-        backend = m['resources'].load_backend(self.root)
-        if self._models is not None:
-            backend.encoder, backend.ranker = self._models
-        backend.warmup()
-        self._models = backend.encoder, backend.ranker
+        # Share only byte-identical resource packages. Different historical
+        # evidence/data implementations retain their own backend objects.
+        resource_dir = Path(m['resources'].__file__).parent
+        resource_key = (settings['number'] == '20', hashlib.sha256(b''.join(
+            p.name.encode() + p.read_bytes() for p in sorted(resource_dir.glob('*.py')))).hexdigest())
+        backend = self._backends.get(resource_key)
+        if backend is None:
+            backend = m['resources'].load_backend(self.root)
+            if self._models is not None:
+                backend.encoder, backend.ranker = self._models
+            backend.warmup()
+            self._models = backend.encoder, backend.ranker
+            self._backends[resource_key] = backend
         gpu = m['scheduler'].GpuScheduler(cfg.queue_capacity)
+        generator = None
         try:
             backend.prime_kernels(gpu)
-            engine = m['engine'](m['retriever'](backend, gpu, cfg), None, backend.names, cfg)
+            transport = RequestTransport(self._base_url)
+            generator = m['generation'].Generator(transport, cfg)
+            asyncio.run_coroutine_threadsafe(transport.prepare(), generator._loop).result(timeout=30)
+            engine = m['engine'](m['retriever'](backend, gpu, cfg), generator, backend.names, cfg)
         except BaseException:
+            if generator is not None:
+                generator.close()
             gpu.close()
             raise
-        row = dict(modules=m, engine=engine, gpu=gpu, histories=OrderedDict(), turn=0)
+        row = dict(modules=m, engine=engine, gpu=gpu, generator=generator, transport=transport,
+                   histories=OrderedDict(), turn=0)
         self._runtimes[sid] = row
-        if len(self._runtimes) > 2:
-            _, old = self._runtimes.popitem(last=False)
-            old['gpu'].close()
         return row
+
+    def prewarm(self, systems, base_url):
+        with self._lock:
+            self._base_url = base_url
+            prepared = {}
+            for system in systems:
+                if system['status'] != 'runnable' or system['config'].get('adapter') != 'modern_flash':
+                    continue
+                start = time.perf_counter()
+                self._runtime(system)
+                prepared[system['id']] = round((time.perf_counter() - start) * 1000, 2)
+            return {'versions_ms': prepared, 'resource_backends': len(self._backends), 'remote_calls': 0}
 
     def stream(self, system, question, *, api_key, base_url, session_id, history, cancel_event):
         with self._lock:
             if cancel_event.is_set():
                 yield 'cancelled', {}
                 return
+            initialized = time.perf_counter()
             row = self._runtime(system)
+            initialization_ms = (time.perf_counter() - initialized) * 1000
             m, engine = row['modules'], row['engine']
             if cancel_event.is_set():
                 yield 'cancelled', {}
@@ -151,24 +245,30 @@ class FlashRuntime:
             row['turn'] += 1
             task = m['task'](question, session_id=session_id, scope='web',
                              turn_id=row['turn'], user_history=history)
-            # Each request owns its client. No key is cached on a shared runtime.
-            transport = m['generation'].OpenAITransport(api_key, base_url)
-            generator = m['generation'].Generator(transport, m['config'])
-            engine.generator = generator
-            calls, terminal, retrieval_ms = [], None, None
+            transport, generator = row['transport'], row['generator']
+            prepared = time.perf_counter()
+            calls, terminal, retrieval_ms, llm_start_ms, first_token = [], None, None, None, True
             try:
+                asyncio.run_coroutine_threadsafe(transport.bind(api_key, base_url), generator._loop).result(timeout=30)
+                client_prepare_ms = (time.perf_counter() - prepared) * 1000
                 yield 'runtime', {'generation_model': m['config'].model,
-                                 'runtime_config': asdict(m['config']), 'system_id': system['id']}
+                                 'runtime_config': asdict(m['config']), 'system_id': system['id'],
+                                 'initialization_ms': initialization_ms, 'client_prepare_ms': client_prepare_ms}
                 for event in engine.stream(task, cancel_event):
                     data = event.data
                     if event.kind == 'token':
                         yield 'token', {'text': data['text']}
+                        if first_token and data['text']:
+                            first_token = False
+                            yield 'latency', {'engine_first_token_ms': event.t_ms,
+                                              'model_first_token_ms': event.t_ms - llm_start_ms if llm_start_ms is not None else None}
                     elif event.kind == 'retrieval_end':
                         retrieval_ms = event.t_ms
                     elif event.kind == 'sources':
                         yield 'sources', {'sources': [public_source(s, i) for i, s in enumerate(data['sources'], 1)],
                                           'retrieval_ms': retrieval_ms}
                     elif event.kind == 'llm_request':
+                        llm_start_ms = event.t_ms
                         calls.append(dict(data))
                         yield 'stage', {'stage': '依据原文生成回答'}
                     elif event.kind == 'generation_end' and calls:
@@ -191,8 +291,14 @@ class FlashRuntime:
                 else:
                     yield 'error', {'message': 'Flash 未完成回答：' + str(terminal.get('reason', terminal['status']))}
             finally:
-                generator.close()
-                engine.generator = None
+                try:
+                    asyncio.run_coroutine_threadsafe(transport.release(), generator._loop).result(timeout=5)
+                except BaseException:
+                    # A loop that cannot drain must never be reused for another key.
+                    generator.close()
+                    row['gpu'].close()
+                    self._runtimes.pop(system['id'], None)
+                    raise
 
     def forget(self, owner, conversation):
         session = owner + ':' + conversation
@@ -204,8 +310,10 @@ class FlashRuntime:
     def close(self):
         with self._lock:
             for row in self._runtimes.values():
+                row['generator'].close()
                 row['gpu'].close()
             self._runtimes.clear()
+            self._backends.clear()
             self._models = None
 
 

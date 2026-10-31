@@ -529,6 +529,11 @@ class ExperimentService:
                 elapsed = max(elapsed, timeline[-1]["at_ms"])
             values = {}
             public_event = event
+            if event in ('runtime', 'latency'):
+                for key in ('initialization_ms','client_prepare_ms','engine_first_token_ms','model_first_token_ms'):
+                    value=payload.get(key)
+                    if isinstance(value,(int,float)) and not isinstance(value,bool) and math.isfinite(value) and value>=0:
+                        metrics[key]=round(value,3)
             if event == "context":
                 messages = payload.get("messages")
                 if isinstance(messages, list) and not json.loads(row["context_json"]):
@@ -546,6 +551,8 @@ class ExperimentService:
                 count = diagnostics.get("call_count")
                 if isinstance(count, int) and not isinstance(count, bool) and count >= 0:
                     metrics["call_count"] = count
+                public_event = None
+            elif event == 'latency':
                 public_event = None
             elif row["terminal"]:
                 return

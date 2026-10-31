@@ -6,6 +6,9 @@ import tempfile
 import time
 import types
 import unittest
+import threading
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import patch
 from fastapi.testclient import TestClient
@@ -163,9 +166,10 @@ class BridgeIntegrationTests(unittest.TestCase):
         b=self.bridge;seen=[]
         def stream(system,question,**kw):
             seen.append((system['id'],kw))
-            yield 'runtime', {'generation_model':'deepseek-flash','runtime_config':{'model':'deepseek-flash','temperature':.1}}
+            yield 'runtime', {'generation_model':'deepseek-flash','runtime_config':{'model':'deepseek-flash','temperature':.1},'initialization_ms':2,'client_prepare_ms':1}
             yield 'sources', {'sources':[{'chunk_id':'actual-source','text_full':'完整原文','citation_id':'E1'}], 'retrieval_ms':44}
             yield 'token', {'text':'现代 Flash 回答'}
+            yield 'latency', {'engine_first_token_ms':500,'model_first_token_ms':456}
             yield 'diagnostics', {'calls':[{'model':'deepseek-flash'}],'call_count':1}
             yield 'final', {'use_streamed_answer':True,'text':'','sources':[],'completion_status':'complete'}
         with patch.object(b._FLASH_RUNTIME,'stream',stream):
@@ -175,12 +179,48 @@ class BridgeIntegrationTests(unittest.TestCase):
                 self.assertEqual(result['status'],'done')
                 self.assertEqual(result['experiment']['generation_model'],'deepseek-flash')
                 self.assertEqual(result['experiment']['metrics']['call_count'],1)
+                self.assertEqual(result['experiment']['metrics']['initialization_ms'],2)
+                self.assertEqual(result['experiment']['metrics']['client_prepare_ms'],1)
+                self.assertEqual(result['experiment']['metrics']['engine_first_token_ms'],500)
+                self.assertEqual(result['experiment']['metrics']['model_first_token_ms'],456)
                 self.assertEqual(result['sources'][0]['text_full'],'完整原文')
                 self.assertEqual(result['experiment']['system_id'],sid)
                 self.assertNotIn('test-owner', str(result))
         self.assertEqual(seen[0][1]['history'],[])
         self.assertEqual(seen[1][1]['history'],['一个自由问题'])
         self.assertEqual(seen[0][1]['api_key'],'test-owner')
+
+    def test_short_answer_publishes_first_chunk_before_completion(self):
+        b=self.bridge;clock=[10.0]
+        with patch.object(b,'_publish_run_event') as publish,patch.object(b.time,'monotonic',lambda:clock[0]):
+            emitter=b._TokenEmitter('run')
+            emitter('');self.assertEqual(publish.call_count,0)
+            emitter('你');publish.assert_called_once_with('run','token',{'text':'你'})
+            emitter('好');self.assertEqual(publish.call_count,1)
+            clock[0]+=.06;emitter('。')
+            self.assertEqual(publish.call_count,2)
+            self.assertEqual(publish.call_args.args[2],{'text':'好。'})
+            emitter.flush();self.assertEqual(publish.call_count,2)
+
+    def test_sse_wakes_when_a_committed_token_arrives(self):
+        from starlette.requests import Request
+        b=self.bridge;waiting=threading.Event()
+        class NotifiedCondition(threading.Condition):
+            def wait(self,timeout=None):
+                waiting.set();return super().wait(timeout)
+        with patch.object(b,'_run_worker',lambda _:None):
+            created=self.create().json()
+        request=Request({'type':'http','method':'GET','client':('127.0.0.1',1),'headers':[]})
+        async def first(response):
+            try:return await anext(response.body_iterator)
+            finally:await response.body_iterator.aclose()
+        with patch.object(b,'_RUN_EVENTS_CHANGED',NotifiedCondition()),ThreadPoolExecutor(max_workers=1) as pool:
+            response=b.stream_run_events(created['run_id'],request,after=created['seq'],access_key='test-owner')
+            future=pool.submit(lambda:asyncio.run(first(response)))
+            self.assertTrue(waiting.wait(2))
+            b._publish_run_event(created['run_id'],'token',{'text':'首段'})
+            frame=future.result(timeout=2)
+            self.assertIn('event: token',frame);self.assertIn('首段',frame)
 
     def test_modern_failure_keeps_partial_text_and_is_not_success(self):
         b=self.bridge
