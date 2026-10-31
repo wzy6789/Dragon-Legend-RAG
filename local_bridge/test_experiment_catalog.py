@@ -1,5 +1,5 @@
 import unittest
-from experiment_catalog import systems, resolve_system, visible_systems, FLASH_REPRESENTATIVES
+from experiment_catalog import systems, resolve_system, visible_systems, FLASH_REPRESENTATIVES, PROMAX_REPRESENTATIVES
 from collections import Counter
 
 class CatalogTests(unittest.TestCase):
@@ -27,5 +27,19 @@ class CatalogTests(unittest.TestCase):
         for variant in ['ev2','plan2','sem','sem_select']:
             self.assertIn('flash-v19-'+variant,ids)
         self.assertIn('flash-v17-patch2',ids)
+
+    def test_promax_one_per_generation_and_three_series_only_max(self):
+        entries=[s for s in visible_systems() if s['family'] in ('Pro','Max','Pro/Max')]
+        self.assertEqual({s['id'] for s in entries},PROMAX_REPRESENTATIVES)
+        self.assertTrue(all(n==1 for n in Counter(s['version'] for s in entries).values()))
+        for s in entries:
+            tier='max' if s['version'].startswith('v3.') else 'pro'
+            self.assertEqual(s['tiers'],[tier])
+            self.assertEqual(s['status'],'runnable')
+        with self.assertRaises(ValueError): resolve_system('max-v32','pro')
+        options=resolve_system('max-v32','max')['config']['request_options']
+        self.assertEqual(options['tier'],'max')
+        self.assertEqual(options['max_calls'],32)
+        self.assertEqual(options['workers'],2)
 
 if __name__=='__main__': unittest.main()

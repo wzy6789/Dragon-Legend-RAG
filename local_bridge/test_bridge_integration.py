@@ -27,6 +27,7 @@ class BridgeIntegrationTests(unittest.TestCase):
         cls.cfg.DEEPSEEK_API_KEY='';cls.cfg.LLM_MODEL='fake-generation';cls.cfg.apply_cap_profile=lambda x:None
         cls.cfg.QWEN_API_KEY='';cls.cfg.QWEN_BASE_URL='https://invalid.test'
         fake=types.ModuleType('agents');fake.QAAgent=FakeAgent;fake._client=None;fake.WebRunCancelled=type('WebRunCancelled',(Exception,),{})
+        fake.gen_model=lambda:cls.cfg.LLM_MODEL
         cls.modules=patch.dict(sys.modules,{'agents':fake,'config':cls.cfg});cls.modules.start()
         sys.path.append(str(Path('F:/龙王传说智能体/src')))
         import v19_profiles
@@ -49,7 +50,7 @@ class BridgeIntegrationTests(unittest.TestCase):
     def wait(self,rid):
         for _ in range(100):
             r=self.client.get('/api/runs/'+rid,headers=self.headers).json()
-            if r['status'] in ('done','error'):return r
+            if r['status'] in ('done','error','stopped'):return r
             time.sleep(.02)
         self.fail('mock run did not finish')
     def test_complete_snapshot_and_idempotency(self):
@@ -91,6 +92,72 @@ class BridgeIntegrationTests(unittest.TestCase):
                 rid=self.create(tier='flash', system_id=sid, client_request_id='old-'+str(i)).json()['run_id']
                 self.assertEqual(self.wait(rid)['status'],'done')
         self.assertEqual(observed,['v1.6','v1.7','v1.8'])
+
+    def test_promax_executes_each_selected_architecture_and_restores_it(self):
+        b=self.bridge;seen=[];profiles=[]
+        def fake_answer(agent,question):
+            names=('PRO_V25_ENABLED','PRO_V30_ENABLED','PRO_V31_ENABLED','PRO_V32_ENABLED')
+            options=getattr(agent,'_pro32_config',None)
+            seen.append((profiles[-1],tuple(getattr(self.cfg,k) for k in names),
+                         self.cfg.KG_ENABLED,self.cfg.CHAPTER_ALIGNMENT_ENABLED,
+                         options.snapshot() if options else None))
+            agent._last_answer_confidence={'completion':'partial'} if options else {}
+            agent._llm_call_metadata=[{'model':'fake-generation','label':'test'}]
+            return '按所选架构生成的模拟回答',[]
+        choices=[('pro-v20','pro','RAG3',(False,False,False,False),False,False),
+                 ('pro-v21','pro','RAG4',(False,False,False,False),False,False),
+                 ('pro-v22','pro','RAG5',(False,False,False,False),True,True),
+                 ('pro-v25','pro','RAG4',(True,False,False,False),False,False),
+                 ('max-v30','max','RAG4',(False,True,False,False),True,False),
+                 ('max-v31','max','RAG4',(False,False,True,False),True,False),
+                 ('max-v32','max','RAG4',(False,False,False,True),True,False),
+                 ('max-v30','max','RAG4',(False,True,False,False),True,False)]
+        before={k:getattr(self.cfg,k) for k in b._PROFILE_FLAGS}
+        with patch.object(FakeAgent,'answer',fake_answer),patch.object(self.cfg,'apply_cap_profile',profiles.append):
+            for i,(sid,tier,profile,flags,kg,align) in enumerate(choices):
+                response=self.create(tier=tier,system_id=sid,client_request_id='route-'+str(i))
+                self.assertEqual(response.status_code,200,response.text)
+                result=self.wait(response.json()['run_id'])
+                self.assertEqual(result['status'],'done',sid)
+                self.assertEqual(seen[-1][:4],(profile,flags,kg,align))
+                self.assertEqual({k:getattr(self.cfg,k) for k in before},before)
+                if sid=='max-v32':
+                    self.assertEqual(seen[-1][4]['max_calls'],32)
+                    self.assertEqual(result['completion_status'],'partial')
+                    self.assertEqual(result['experiment']['runtime_config']['max_calls'],32)
+                    self.assertEqual(result['experiment']['metrics']['call_count'],1)
+                else:self.assertIsNone(seen[-1][4])
+        agent=b._get_agent('same-chat',b._owner_id('test-owner'))
+        self.assertIsNone(getattr(agent,'_pro32_config',None))
+
+    def test_max32_options_and_callbacks_are_cleared_on_failure(self):
+        b=self.bridge
+        def fail(agent,question):
+            self.assertEqual(agent._pro32_config.max_calls,32)
+            raise RuntimeError('simulated generation failure')
+        with patch.object(FakeAgent,'answer',fail):
+            rid=self.create(tier='max',system_id='max-v32').json()['run_id']
+            self.assertEqual(self.wait(rid)['status'],'error')
+        agent=b._get_agent('same-chat',b._owner_id('test-owner'))
+        self.assertIsNone(getattr(agent,'_pro32_config',None))
+        self.assertFalse(hasattr(agent,'_web_cancel_check'))
+        self.assertFalse(self.cfg.PRO_V32_ENABLED)
+
+    def test_max32_cancellation_stops_before_model_request(self):
+        b=self.bridge
+        def cancel(agent,question):
+            from pro32.llm import ModelGateway
+            from pro32.contracts import Budget
+            for flag in b._RUN_CANCEL.values(): flag.set()
+            gateway=ModelGateway(object(),'fake','deepseek',Budget(32,32),agent._web_cancel_check)
+            gateway.check_cancel()
+            self.fail('cancelled gateway must not continue')
+        with patch.object(FakeAgent,'answer',cancel):
+            rid=self.create(tier='max',system_id='max-v32').json()['run_id']
+            self.assertEqual(self.wait(rid)['status'],'stopped')
+        agent=b._get_agent('same-chat',b._owner_id('test-owner'))
+        self.assertIsNone(getattr(agent,'_pro32_config',None))
+        self.assertFalse(self.cfg.PRO_V32_ENABLED)
 
     def test_modern_flash_records_actual_model_sources_history_and_selected_revision(self):
         b=self.bridge;seen=[]

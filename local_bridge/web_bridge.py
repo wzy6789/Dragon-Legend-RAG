@@ -354,13 +354,14 @@ def _authorize(request: Request, access_key: str | None) -> None:
 @contextmanager
 def _request_runtime(tier: str, user_key: str | None,
                      flash_version: str | None = None,
-                     flash_profile: str | None = None):
+                     flash_profile: str | None = None,
+                     settings: dict | None = None):
     """将 BYOK 与能力档严格限定在单次请求。
 
     QAAgent 的既有实现以 config 模块作为运行时配置，所以必须
     串行切换：这可避免一个 Pro 请求在执行时被 Max 请求意外升档。
     """
-    tier_config = _TIER_PROFILES[tier]
+    tier_config = settings if settings is not None else _TIER_PROFILES[tier]
     with _llm_lock:
         old_key, old_client = config.DEEPSEEK_API_KEY, agents._client
         old_flags = {name: getattr(config, name) for name in _PROFILE_FLAGS}
@@ -368,6 +369,8 @@ def _request_runtime(tier: str, user_key: str | None,
         old_v19_profile = None
         old_v19_flags = {}
         config.apply_cap_profile(tier_config["profile"])
+        if 'chapter_alignment' in tier_config:
+            config.CHAPTER_ALIGNMENT_ENABLED = tier_config['chapter_alignment']
         # v1.8 的 Flash 只使用认证图谱的一跳导航；它不能沿用 RAG1 的
         # KG=False 档位，否则“Compiled Reflex”会退化成普通文本检索。
         requested_flash = str(
@@ -383,14 +386,13 @@ def _request_runtime(tier: str, user_key: str | None,
             or (not requested_flash and bool(getattr(config, "FLASH_V18_ENABLED", False)))
         )
         config.KG_ENABLED = bool(tier_config["kg"] or v18 or v19)
-        config.PRO_V25_ENABLED = bool(tier_config["v25"])
-        config.PRO_V25_KG_ENABLED = bool(tier_config["v25"])
+        config.PRO_V25_ENABLED = bool(tier_config.get("v25", False))
+        config.PRO_V25_KG_ENABLED = bool(tier_config.get("v25", False))
         config.PRO_V30_ENABLED = bool(tier_config.get("v30", False))
         config.PRO_V30_KG_ENABLED = bool(tier_config.get("v30", False))
         config.PRO_V31_ENABLED = bool(tier_config.get("v31", False))
         config.PRO_V31_KG_ENABLED = bool(tier_config.get("v31", False))
-        # v3.2 remains a separately tested candidate. Preserve current production routes.
-        config.PRO_V32_ENABLED = False
+        config.PRO_V32_ENABLED = bool(tier_config.get('v32',False))
         if v19:
             import v19_profiles as v19_module
             old_v19_profile = v19_module.active_profile()
@@ -731,6 +733,7 @@ def _run_worker(run_id: str) -> None:
             llm_api_key,
             settings.get("flash_version") if tier == "flash" else None,
             flash_profile=settings.get("flash_profile") if tier == "flash" else None,
+            settings=settings,
         ):
             experiment_service.started(run_id)
             if tier == "flash":
@@ -771,9 +774,21 @@ def _run_worker(run_id: str) -> None:
                 agent._web_draft_callback = draft_emitter
                 agent._web_stage_callback = on_stage
                 agent._web_cancel_check = cancel_event.is_set
+                previous_options = getattr(agent, '_pro32_config', None)
+                if settings.get('v32'):
+                    from pro32.config import RequestConfig
+                    agent._pro32_config = RequestConfig(**{**settings['request_options'],
+                        'model': agents.gen_model(), 'provider': getattr(config,'GENERATION_PROVIDER','deepseek')})
+                    experiment_service.on_event(run_id,'runtime',{
+                        'generation_model': agent._pro32_config.model,
+                        'runtime_config': agent._pro32_config.snapshot(),
+                    })
+                else:
+                    agent._pro32_config = None
                 try:
                     answer, raw_sources = agent.answer(question)
                 finally:
+                    agent._pro32_config = previous_options
                     draft_emitter.finish()
                     for attr in ("_web_draft_callback", "_web_stage_callback", "_web_cancel_check"):
                         try:
@@ -787,7 +802,7 @@ def _run_worker(run_id: str) -> None:
                 _publish_run_event(run_id, "final", {
                     "text": _tidy_list_spacing(answer or ""),
                     "sources": _sources(raw_sources),
-                    "completion_status": str(confidence.get("completion_status", "complete")),
+                    "completion_status": str(confidence.get("completion_status", confidence.get('completion', "complete"))),
                     "warning": str(confidence.get("warning", "")),
                 })
         experiment_service.on_event(run_id, "diagnostics", {
@@ -848,10 +863,15 @@ def create_run(
     system["generation_model"] = (system['config']['parameters']['model'] if modern else str(getattr(config, "LLM_MODEL", "未记录")))
     system["generation_provider"] = 'deepseek' if modern else str(getattr(config, "GENERATION_PROVIDER", "未记录"))
     engine_source = (experiment_catalog.ROOT / system['source'])
-    system["engine_fingerprint"] = system.get('code_fingerprint') if modern else experiment_catalog.fingerprint([
-        experiment_catalog.ROOT/"src/agents.py", experiment_catalog.ROOT/"src/vector_store.py",
-        engine_source,
-        experiment_catalog.ROOT/"src/pro_v31.py"])
+    engine_files = [experiment_catalog.ROOT/'src'/name for name in ('agents.py','vector_store.py','config.py')]
+    engine_files.extend(sorted(engine_source.rglob('*.py')) if engine_source.is_dir() else [engine_source])
+    if system['config'].get('v30') or system['config'].get('v31'):
+        engine_files.append(experiment_catalog.ROOT/'src/pro_v25.py')
+    if system['config'].get('v31'):
+        engine_files.append(experiment_catalog.ROOT/'src/pro_v30.py')
+    if system['config'].get('v32'):
+        engine_files.append(experiment_catalog.ROOT/'src/pro_v32.py')
+    system["engine_fingerprint"] = system.get('code_fingerprint') if modern else experiment_catalog.fingerprint(engine_files)
     system["bridge_fingerprint"] = hashlib.sha256(b"".join(p.read_bytes() for p in sorted(Path(__file__).parent.glob("*.py")) if not p.name.startswith("test_"))).hexdigest()
     if req.tier == "flash" and system['config'].get('flash_version') == 'v1.9':
         import v19_profiles

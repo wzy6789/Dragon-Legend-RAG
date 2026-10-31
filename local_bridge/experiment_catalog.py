@@ -17,6 +17,7 @@ FLASH_REPRESENTATIVES = {
     'flash-v20-original', 'flash-v20', 'flash-v21-r3', 'flash-v21',
     'flash-v22-frozen-r1', 'flash-v22-frozen-r2',
 }
+PROMAX_REPRESENTATIVES = {'pro-v20','pro-v21','pro-v22','pro-v25','max-v30','max-v31','max-v32'}
 
 def fingerprint(paths):
     return hashlib.sha256(''.join(str(p.relative_to(ROOT))+':'+hashlib.sha256(p.read_bytes()).hexdigest()
@@ -62,15 +63,38 @@ def systems():
     for sid,version,variant in historic:
         add('pro-v'+sid,'Pro/Max',version,variant,'src/agents.py',['pro','max'],'archive',
             notes='历史能力组合；展示归档，恢复运行需对应冻结配置')
+    for sid,profile,kg,alignment,variant in [
+        ('pro-v20','RAG3',False,False,'Agentic 落地校验'),
+        ('pro-v21','RAG4',False,False,'Ewe 证据工作记忆'),
+        ('pro-v22','RAG5',True,True,'章节对齐与图谱补检'),
+    ]:
+        item=next(x for x in out if x['id']==sid)
+        item.update(family='Pro',tiers=['pro'],status='runnable',variant=variant,
+                    label='Pro '+item['version']+' · '+variant,
+                    config={'profile':profile,'kg':kg,'chapter_alignment':alignment},
+                    notes='按保留的能力配置运行，使用当前代码、资料与官网生成模型；不等同于历史环境复现。')
     for variant in ['kg-on','kg-off']:
         add('pro-v22-'+variant,'Pro/Max','v2.2',variant,'src/kg',['pro','max'])
     for sid,version,source,flags,tiers in [
-        ('pro-v25','v2.5','src/pro_v25.py',{'v25':True},['pro']),
+        ('pro-v25','v2.5','src/pro_v25.py',{'v25':True,'kg':False},['pro']),
         ('max-v30','v3.0','src/pro_v30.py',{'v30':True},['max']),
         ('max-v31','v3.1','src/pro_v31.py',{'v31':True},['max']),
-        ('pro-v32','v3.2','src/pro32',{},['pro','max'])]:
-        add(sid,'Pro/Max',version,'base',source,tiers,'runnable' if sid in DEFAULTS.values() else 'pending',
-            {'profile':'RAG4','kg':True,**flags})
+        ('max-v32','v3.2','src/pro32',{'v32':True},['max'])]:
+        caption={'pro-v25':'证据义务与定向修订','max-v30':'自主调查与反证','max-v31':'时间线与结论核验','max-v32':'证据闭环与局部修复'}[sid]
+        add(sid,'Max' if version.startswith('v3.') else 'Pro',version,caption,source,tiers,'runnable',
+            {'profile':'RAG4','kg':True,'chapter_alignment':False,**flags},
+            notes='使用该代保留实现与当前资料、官网生成模型；历史成绩保留在报告中。')
+    v32=next(x for x in out if x['id']=='max-v32')
+    manifest=ROOT/'results/pro32/formal_legacy50_v32_20261003/manifest.json'
+    if manifest.is_file():
+        recorded=json.loads(manifest.read_text(encoding='utf-8'))['config']
+        v32['config']['request_options']={**recorded,'tier':'max','model':'','provider':'',
+            'graph_dir':str(ROOT/'data/kg/profiles/v2.2'), 'trace_dir':str(ROOT/'data/web-promax/traces')}
+        v32['results']=['results/pro32/formal_legacy50_v32_20261003','results/pro32/formal49_v32_20261001_judge4']
+        v32['notes']='证据闭环代表版，归属 Max；沿用历史代表的 32 次调用上限，未扩到 48 次。生成模型使用官网当前配置。'
+        v32['code_fingerprint']=fingerprint(sorted((ROOT/'src/pro32').glob('*.py'))+[ROOT/'src/pro_v32.py'])
+    else:
+        v32['status']='archive'
     add('baseline-v00','基线与消融','v0.0','裸模型','src/agents.py',[],'archive')
     for variant in ['crag','agentic','ewe','chapter-align','kg-off','kg-on']:
         add('ablation-'+variant,'基线与消融','controlled',variant,'src/agents.py',[],'archive')
@@ -108,4 +132,7 @@ def install(app):
 def visible_systems():
     # Historical identities remain resolvable for saved runs; the website shows
     # at most two measured representatives per Flash generation.
-    return [s for s in systems() if s['family'] != 'Flash' or s['id'] in FLASH_REPRESENTATIVES]
+    return [s for s in systems()
+            if (s['family'] != 'Flash' or s['id'] in FLASH_REPRESENTATIVES)
+            and (s['family'] not in ('Pro','Max','Pro/Max') or s['id'] in PROMAX_REPRESENTATIVES)
+            and s['family'] != '历史实验']
