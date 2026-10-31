@@ -1,5 +1,5 @@
 import { createSSEParser } from "./sse";
-import type { ApiError, ApiErrorKind, RunEvent, RunSnapshot, Tier } from "./types";
+import type { ApiError, ApiErrorKind, ArchiveBatch, ArchiveDocument, Benchmark, Experiment, ResearchRequest, RunEvent, RunSnapshot, SystemRegistry, Tier } from "./types";
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000").replace(/\/$/, "");
 
@@ -9,6 +9,10 @@ export interface RunRequestOptions {
   conversationId: string;
   clientRequestId: string;
   apiKey: string;
+  accessKey?: string;
+  research?: ResearchRequest;
+  adminToken?: string;
+  comparisonParentRunId?: string;
 }
 
 export interface RunEventHandlers {
@@ -47,8 +51,9 @@ async function throwResponseError(response: Response): Promise<never> {
     // Keep a stable user-facing message when the bridge returns no JSON body.
   }
   const kind = classifyStatus(response.status);
-  const error = new Error(message || ERROR_TEXT[kind]) as Error & { kind?: ApiErrorKind };
+  const error = new Error(message || ERROR_TEXT[kind]) as Error & { kind?: ApiErrorKind; status?: number };
   error.kind = kind;
+  error.status = response.status;
   throw error;
 }
 
@@ -61,13 +66,22 @@ export async function createRun(options: RunRequestOptions): Promise<RunSnapshot
         cache: "no-store",
         headers: {
           "Content-Type": "application/json",
-          ...authHeaders(options.apiKey, true),
+          ...authHeaders(options.accessKey ?? options.apiKey),
+          "X-LLM-API-Key": options.apiKey,
+          ...(options.adminToken ? { "X-Experiment-Admin": options.adminToken } : {}),
         },
         body: JSON.stringify({
           message: options.message,
           tier: options.tier,
           conversation_id: options.conversationId,
           client_request_id: options.clientRequestId,
+          ...((options.comparisonParentRunId ?? options.research?.comparisonParentRunId) ? { comparison_parent_run_id: options.comparisonParentRunId ?? options.research?.comparisonParentRunId } : {}),
+          ...(options.research ? {
+            system_id: options.research.systemId,
+            benchmark_id: options.research.benchmarkId,
+            question_id: options.research.questionId,
+            ...(options.research.protocolId ? { protocol_id: options.research.protocolId } : {}),
+          } : {}),
         }),
       });
       break;
@@ -194,9 +208,62 @@ export async function fetchHealth(): Promise<{
 }
 
 export function asApiError(value: unknown): ApiError {
-  const error = value as Error & { kind?: ApiErrorKind };
+  const error = value as Error & { kind?: ApiErrorKind; status?: number };
   return {
     kind: error?.kind ?? "unknown",
     message: error?.message || ERROR_TEXT.unknown,
+    status: error?.status,
   };
+}
+
+async function researchGet<T>(path: string, accessKey?: string, adminToken?: string, signal?: AbortSignal): Promise<T> {
+  const response = await fetch(`${API_BASE}${path}`, {
+    cache: "no-store", signal,
+    headers: { ...(accessKey ? authHeaders(accessKey) : {}), ...(adminToken ? { "X-Experiment-Admin": adminToken } : {}) },
+  });
+  if (!response.ok) await throwResponseError(response);
+  return await response.json() as T;
+}
+
+export function getSystems(signal?: AbortSignal): Promise<SystemRegistry> {
+  return researchGet("/api/systems", undefined, undefined, signal);
+}
+
+export function getBenchmarks(signal?: AbortSignal): Promise<{ benchmarks: Benchmark[] }> {
+  return researchGet("/api/benchmarks", undefined, undefined, signal);
+}
+
+export function getExperiment(runId: string, accessKey: string, signal?: AbortSignal): Promise<Experiment> {
+  return researchGet(`/api/runs/${encodeURIComponent(runId)}/experiment`, accessKey, undefined, signal);
+}
+
+export function getAdminStatus(adminToken?: string, accessKey?: string, signal?: AbortSignal): Promise<{ authenticated: boolean; configured: boolean }> {
+  return researchGet("/api/admin/status", accessKey, adminToken, signal);
+}
+
+export async function loginAdmin(password: string, accessKey: string): Promise<{ token: string; expires_at: string | number }> {
+  const response = await fetch(`${API_BASE}/api/admin/login`, {
+    method: "POST", cache: "no-store", headers: { "Content-Type": "application/json", ...authHeaders(accessKey) }, body: JSON.stringify({ password }),
+  });
+  if (!response.ok) await throwResponseError(response);
+  return await response.json();
+}
+
+export async function evaluateRun(runId: string, accessKey: string, adminToken: string): Promise<unknown> {
+  if (!adminToken) throw new Error("请先登录管理员，再发起评测。");
+  const response = await fetch(`${API_BASE}/api/runs/${encodeURIComponent(runId)}/evaluate`, {
+    method: "POST", cache: "no-store", headers: { ...authHeaders(accessKey), "X-Experiment-Admin": adminToken, "Content-Type": "application/json" }, body: "{}",
+  });
+  if (!response.ok) await throwResponseError(response);
+  return await response.json();
+}
+
+export async function getArchives(accessKey: string, adminToken: string, signal?: AbortSignal): Promise<{ batches: ArchiveBatch[] }> {
+  if (!adminToken) throw new Error("历史归档需要管理员登录。");
+  return researchGet("/api/archives", accessKey, adminToken, signal);
+}
+
+export async function getArchive(id: string, accessKey: string, adminToken: string, signal?: AbortSignal): Promise<ArchiveDocument> {
+  if (!adminToken) throw new Error("历史归档需要管理员登录。");
+  return researchGet(`/api/archives/${encodeURIComponent(id)}`, accessKey, adminToken, signal);
 }

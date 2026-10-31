@@ -4,6 +4,7 @@ import type { RefObject } from "react";
 import type { ChatMessage } from "@/lib/types";
 import EmptyState from "./EmptyState";
 import MessageItem from "./MessageItem";
+import ComparisonResults from "./ComparisonResults";
 
 interface Props {
   messages: ChatMessage[];
@@ -15,6 +16,10 @@ interface Props {
   onScroll: () => void;
   showLatest: boolean;
   onLatest: () => void;
+  onInspect: (id: string) => void;
+  selectedId?: string;
+  busy: boolean;
+  comparisonPending?: boolean;
 }
 
 export default function ChatView({
@@ -27,6 +32,10 @@ export default function ChatView({
   onScroll,
   showLatest,
   onLatest,
+  onInspect,
+  selectedId,
+  busy,
+  comparisonPending,
 }: Props) {
   const empty = messages.length === 0;
 
@@ -36,10 +45,16 @@ export default function ChatView({
       {empty ? (
         <EmptyState onPick={onPick} />
       ) : (
-        <div className="conversation-column mx-auto w-full space-y-10 px-4 py-7 sm:px-8 sm:py-10">
-          {messages.map((m) => (
-            <MessageItem key={m.id} message={m} onRegenerate={onRegenerate} onDelete={onDeleteMessage} />
-          ))}
+        <div className="research-thread">
+          {messages.map((m, index) => {
+            const groupId = m.role === "assistant" ? m.research?.comparisonId : undefined;
+            if (groupId) {
+              if (messages.slice(0, index).some((message) => message.role === "assistant" && message.research?.comparisonId === groupId)) return null;
+              const group = messages.filter((message) => message.role === "assistant" && message.research?.comparisonId === groupId);
+              return <section className="comparison-group" key={groupId}><div className="comparison-heading"><span>顺序比较</span><span>A → B · 相同问题与协议</span></div><div className="comparison-grid">{group.map((message, position) => <div key={message.id} className={selectedId === message.id ? "answer-card is-selected" : "answer-card"}><span className="comparison-position">系统 {String.fromCharCode(65 + position)}</span><MessageItem message={message} onRegenerate={busy ? undefined : onRegenerate} onDelete={onDeleteMessage} onInspect={onInspect} /></div>)}{group.length === 1 && comparisonPending && <div className="comparison-waiting"><span className="comparison-position">系统 B</span><p>等待系统 A 结束后运行</p><span>切换会话后仍将继续</span></div>}</div><ComparisonResults messages={messages} comparisonId={groupId} /></section>;
+            }
+            return <div key={m.id} className={m.role === "assistant" ? `answer-card ${selectedId === m.id ? "is-selected" : ""}` : "question-block"}><MessageItem message={m} onRegenerate={busy ? undefined : onRegenerate} onDelete={onDeleteMessage} onInspect={onInspect} /></div>;
+          })}
           <div ref={bottomRef} />
         </div>
       )}

@@ -1,14 +1,17 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { asApiError, cancelRun, createRun, deleteAllServerConversations, deleteRun, deleteServerConversation, fetchHealth, getRun, getRunByRequest, subscribeRun } from "@/lib/api";
+import { asApiError, cancelRun, createRun, deleteAllServerConversations, deleteRun, deleteServerConversation, fetchHealth, getRun, getRunByRequest, subscribeRun, getSystems, getBenchmarks, getExperiment, getAdminStatus, loginAdmin, evaluateRun } from "@/lib/api";
 import { clearConversations, deleteConversation as deleteConversationRow, listConversations, putConversation } from "@/lib/chat-store";
 import { clearStoredCredentials, loadStoredCredentials, saveStoredCredentials } from "@/lib/credential-store";
 import { filterConversations, makeTitle } from "@/lib/history";
-import type { ApiError, ChatMessage, Conversation, RunEvent, RunSnapshot, Tier } from "@/lib/types";
-import AppShell from "./AppShell";
+import type { ApiError, Benchmark, BenchmarkQuestion, BrowserDelivery, ChatMessage, ComparisonTask, Conversation, ResearchRequest, ResearchSystem, RunEvent, RunSnapshot, SystemRegistry, Tier } from "@/lib/types";
+import { canRunSystem, DEFAULT_SYSTEMS, downloadFile, exportBatch, nextComparisonTask, shouldPollExperiment, withoutCredentials, type ExportFormat } from "@/lib/workbench";
+import WorkbenchShell, { type WorkbenchView } from "./WorkbenchShell";
+import ExperimentInspector from "./ExperimentInspector";
+import AdminDialog from "./AdminDialog";
+import { BenchmarksPanel, ReportsPanel, VersionsPanel } from "./ResearchPanels";
 import ChatView from "./ChatView";
-import Composer from "./Composer";
 import ConfirmDialog from "./ConfirmDialog";
 import LoginGate from "./LoginGate";
 import SettingsDialog from "./SettingsDialog";
@@ -68,6 +71,27 @@ export default function Workspace() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [evidenceOpen, setEvidenceOpen] = useState(false);
   const [connection, setConnection] = useState<"checking" | "ready" | "offline">("checking");
+  const [view, setView] = useState<WorkbenchView>("history");
+  const [registry, setRegistry] = useState<SystemRegistry>({ systems: [], defaults: DEFAULT_SYSTEMS });
+  const [benchmarks, setBenchmarks] = useState<Benchmark[]>([]);
+  const [registryError, setRegistryError] = useState("");
+  const [benchmarkError, setBenchmarkError] = useState("");
+  const [registryRefresh, setRegistryRefresh] = useState(0);
+  const [systemId, setSystemId] = useState(DEFAULT_SYSTEMS.flash);
+  const [compare, setCompare] = useState(false);
+  const [compareSystemId, setCompareSystemId] = useState("");
+  const [questionSelection, setQuestionSelection] = useState<{ bank: Benchmark; question: BenchmarkQuestion } | null>(null);
+  const [selectedMessageId, setSelectedMessageId] = useState<string | null>(null);
+  const [experimentError, setExperimentError] = useState("");
+  const [experimentRefresh, setExperimentRefresh] = useState(0);
+  const [notice, setNotice] = useState("");
+  const [adminToken, setAdminToken] = useState("");
+  const [adminExpires, setAdminExpires] = useState<string | number | null>(null);
+  const [adminConfigured, setAdminConfigured] = useState<boolean | null>(null);
+  const [adminOpen, setAdminOpen] = useState(false);
+  const [adminBusy, setAdminBusy] = useState(false);
+  const [adminError, setAdminError] = useState("");
+  const [evaluating, setEvaluating] = useState(false);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -78,6 +102,10 @@ export default function Workspace() {
   const stickRef = useRef(true);
   const draftsRef = useRef<Map<string, string>>(new Map());
   const [showLatest, setShowLatest] = useState(false);
+  const comparisonLaunchingRef = useRef<Set<string>>(new Set());
+  const browserObservers = useRef<Map<string, { start: number; delivery: BrowserDelivery }>>(new Map());
+  const secretsRef = useRef<string[]>([]);
+  secretsRef.current = [creds?.accessKey ?? "", creds?.llmApiKey ?? "", adminToken];
 
   const signedIn = Boolean(creds?.accessKey && creds?.llmApiKey);
   const active = useMemo(() => conversations.find((c) => c.id === activeId) ?? null, [conversations, activeId]);
@@ -90,10 +118,13 @@ export default function Workspace() {
       .filter((message) => message.role === "assistant" && message.clientRequestId && !message.runId && ACTIVE_STATUSES.has(message.status ?? ""))
       .map((message) => `${conversation.id}:${message.id}:${message.clientRequestId}`),
   ).join("|"), [conversations]);
-  const title = active?.title ?? "新对话";
   const assistantMessages = active?.messages.filter((m) => m.role === "assistant") ?? [];
-  const activeAssistant = assistantMessages[assistantMessages.length - 1];
-  const evidence = activeAssistant?.sources ?? [];
+  const activeAssistant = assistantMessages.find((message) => message.id === selectedMessageId) ?? assistantMessages.at(-1);
+  const selectedSystem = registry.systems.find((system) => system.id === systemId);
+  const compareSystem = registry.systems.find((system) => system.id === compareSystemId);
+  const compatibleSystems = registry.systems.filter((system) => system.tiers.includes(tier));
+  const comparisonBusy = Boolean(active?.compareQueue?.length);
+  const canSubmit = canRunSystem(selectedSystem, tier) && (!compare || Boolean(compareSystem?.status === "runnable" && compareSystem.id !== systemId && compareSystem.tiers.some((value) => ["flash", "pro", "max"].includes(value))));
 
   const updateConversation = useCallback((id: string, update: (conversation: Conversation) => Conversation, immediate = false) => {
     const next = convsRef.current.map((conversation) => conversation.id === id ? update(conversation) : conversation);
@@ -124,10 +155,20 @@ export default function Workspace() {
     }));
   }, [updateConversation]);
 
+  const observeDelivery = useCallback((message: ChatMessage, hasContent: boolean, done: boolean): BrowserDelivery | undefined => {
+    const observer = browserObservers.current.get(message.id);
+    if (!observer) return message.browserDelivery;
+    const elapsed = Math.max(0, performance.now() - observer.start);
+    if (hasContent && observer.delivery.firstContentMs === undefined) observer.delivery.firstContentMs = elapsed;
+    if (done && observer.delivery.completedMs === undefined) observer.delivery.completedMs = elapsed;
+    return { ...observer.delivery };
+  }, []);
+
   useEffect(() => {
     const stored = loadStoredCredentials();
     if (stored) setCreds(stored);
     try { setCollapsed(localStorage.getItem("dragon-legend.sidebar-collapsed") === "true"); } catch { /* optional preference */ }
+    setEvidenceOpen(window.matchMedia("(min-width: 1200px)").matches);
     setHydrated(true);
   }, []);
 
@@ -148,6 +189,8 @@ export default function Workspace() {
       if (restored.length) {
         setActiveId(restored[0].id);
         setTier(restored[0].tier);
+        const latest = [...restored[0].messages].reverse().find((message) => message.role === "assistant");
+        setSystemId(latest?.research?.systemId ?? latest?.experiment?.system_id ?? DEFAULT_SYSTEMS[restored[0].tier]);
       }
     });
     return () => { alive = false; };
@@ -171,6 +214,75 @@ export default function Workspace() {
     const timer = window.setInterval(check, 15000);
     return () => { alive = false; window.clearInterval(timer); };
   }, [signedIn]);
+
+  useEffect(() => {
+    if (!signedIn) return;
+    const controller = new AbortController();
+    void getSystems(controller.signal).then((data) => {
+      if (controller.signal.aborted) return;
+      setRegistry(data); setRegistryError("");
+      setSystemId((current) => data.systems.some((system) => system.id === current) ? current : data.defaults.flash);
+    }).catch((error) => { if (!controller.signal.aborted) setRegistryError(asApiError(error).message); });
+    void getBenchmarks(controller.signal).then((data) => { if (!controller.signal.aborted) { setBenchmarks(data.benchmarks); setBenchmarkError(""); } }).catch((error) => { if (!controller.signal.aborted) setBenchmarkError(asApiError(error).message); });
+    return () => controller.abort();
+  }, [signedIn, registryRefresh]);
+
+  const expireAdmin = useCallback(() => { setAdminToken(""); setAdminExpires(null); setAdminError("管理员会话已过期，请重新登录。"); }, []);
+
+  useEffect(() => {
+    if (!signedIn) return;
+    const controller = new AbortController();
+    const check = async () => {
+      try {
+        const status = await getAdminStatus(adminToken || undefined, creds?.accessKey, controller.signal);
+        if (controller.signal.aborted) return;
+        setAdminConfigured(status.configured);
+        if (adminToken && !status.authenticated) expireAdmin();
+      } catch (error) { if (!controller.signal.aborted && adminToken && asApiError(error).kind === "auth") expireAdmin(); }
+    };
+    void check();
+    const timer = window.setInterval(check, 30000);
+    return () => { controller.abort(); window.clearInterval(timer); };
+  }, [signedIn, adminToken, creds?.accessKey, expireAdmin]);
+
+  useEffect(() => {
+    if (!adminToken || adminExpires == null) return;
+    const raw = typeof adminExpires === "number" ? adminExpires < 1e12 ? adminExpires * 1000 : adminExpires : Date.parse(adminExpires);
+    if (!Number.isFinite(raw)) return;
+    const timer = window.setTimeout(expireAdmin, Math.max(0, Math.min(raw - Date.now(), 2147483647)));
+    return () => window.clearTimeout(timer);
+  }, [adminToken, adminExpires, expireAdmin]);
+
+  // Independent from the generation stream: completed answers may still be judged.
+  useEffect(() => {
+    if (!creds || !activeId || !activeAssistant?.runId) return;
+    const controller = new AbortController();
+    const conversationId = activeId, messageId = activeAssistant.id, runId = activeAssistant.runId;
+    let timer: number | undefined;
+    setExperimentError("");
+    const poll = async () => {
+      let again = true;
+      try {
+        const experiment = await getExperiment(runId, creds.accessKey, controller.signal);
+        if (controller.signal.aborted) return;
+        updateRunMessage(conversationId, messageId, (message) => ({ ...message, experiment: withoutCredentials(experiment, secretsRef.current) as typeof experiment }));
+        setExperimentError("");
+        const latest = convsRef.current.find((conversation) => conversation.id === conversationId)?.messages.find((message) => message.id === messageId);
+        again = shouldPollExperiment(latest?.status, experiment);
+      } catch (error) {
+        if (!controller.signal.aborted) {
+          const apiError = asApiError(error);
+          const latest = convsRef.current.find((conversation) => conversation.id === conversationId)?.messages.find((message) => message.id === messageId);
+          if (apiError.status === 404 && !latest?.experiment && !ACTIVE_STATUSES.has(latest?.status ?? "")) {
+            again = false; setExperimentError("");
+          } else setExperimentError(`实验记录暂未同步：${apiError.message}`);
+        }
+      }
+      if (again && !controller.signal.aborted) timer = window.setTimeout(poll, 2000);
+    };
+    void poll();
+    return () => { controller.abort(); window.clearTimeout(timer); };
+  }, [activeId, activeAssistant?.id, activeAssistant?.runId, creds?.accessKey, experimentRefresh, updateRunMessage]);
 
   useEffect(() => {
     if (!active) return;
@@ -200,7 +312,8 @@ export default function Workspace() {
     const seq = Number(event.seq ?? 0);
     updateRunMessage(conversationId, messageId, (message) => {
       if (seq && seq <= (message.lastSeq ?? 0)) return message;
-      const base = { ...message, lastSeq: Math.max(seq, message.lastSeq ?? 0) };
+      const contentEvent = ["draft_token", "token", "final"].includes(type) && Boolean(event.text || (event.use_streamed_answer && message.content));
+      const base = { ...message, lastSeq: Math.max(seq, message.lastSeq ?? 0), browserDelivery: observeDelivery(message, contentEvent, type === "done") };
       if (type === "queued") return { ...base, status: "queued", stage: String(event.stage ?? "排队中") };
       if (type === "stage") return { ...base, status: "running", stage: String(event.stage ?? "正在处理") };
       if (type === "draft_reset") return { ...base, content: "", provisional: true, status: "streaming", stage: "生成待核验初稿" };
@@ -224,9 +337,11 @@ export default function Workspace() {
       if (type === "error") return { ...base, status: "error", stage: "", error: String(event.message ?? "生成失败，请重试。") };
       return base;
     });
-  }, [updateRunMessage]);
+  }, [updateRunMessage, observeDelivery]);
 
   const syncSnapshot = useCallback((conversationId: string, messageId: string, snapshot: RunSnapshot) => {
+    const queued = convsRef.current.find((conversation) => conversation.id === conversationId)?.compareQueue?.some((task) => task.afterMessageId === messageId && task.comparisonParentRunId !== snapshot.run_id);
+    if (queued) updateConversation(conversationId, (conversation) => ({ ...conversation, compareQueue: conversation.compareQueue?.map((task) => task.afterMessageId === messageId ? { ...task, comparisonParentRunId: snapshot.run_id } : task) }), true);
     updateRunMessage(conversationId, messageId, (message) => {
       const status = statusFromSnapshot(snapshot.status);
       const content = snapshot.answer || snapshot.draft || message.content;
@@ -243,9 +358,11 @@ export default function Workspace() {
         warning: snapshot.warning || message.warning,
         error: snapshot.error || (snapshot.status === "interrupted" ? "本机服务曾重启，已保留已有内容。请重新发送。" : message.error),
         provisional: Boolean(snapshot.draft && !snapshot.answer),
+        experiment: snapshot.experiment ? withoutCredentials(snapshot.experiment, secretsRef.current) as typeof snapshot.experiment : message.experiment,
+        browserDelivery: observeDelivery(message, Boolean(snapshot.answer || snapshot.draft), snapshot.status === "done"),
       };
     });
-  }, [updateRunMessage]);
+  }, [updateRunMessage, observeDelivery, updateConversation]);
 
   const attachRun = useCallback(async (
     conversationId: string,
@@ -254,6 +371,8 @@ export default function Workspace() {
     accessKey: string,
     signal: AbortSignal,
   ) => {
+    const existing = convsRef.current.find((conversation) => conversation.id === conversationId)?.messages.find((message) => message.id === messageId);
+    if (!browserObservers.current.has(messageId) && !existing?.browserDelivery?.completedMs) browserObservers.current.set(messageId, { start: performance.now(), delivery: { observedFrom: "reattachment" } });
     let failures = 0;
     while (!signal.aborted) {
       try {
@@ -261,7 +380,12 @@ export default function Workspace() {
         syncSnapshot(conversationId, messageId, snapshot);
         if (["done", "error", "stopped", "interrupted"].includes(snapshot.status)) return;
         await subscribeRun(runId, snapshot.seq, accessKey, signal, {
-          onEvent: (type, event) => applyEvent(conversationId, messageId, type, event),
+          onEvent: (type, event) => {
+            applyEvent(conversationId, messageId, type, event);
+            if (["done", "cancelled", "interrupted", "error"].includes(type)) {
+              void getRun(runId, accessKey).then((finished) => syncSnapshot(conversationId, messageId, finished)).catch(() => { /* inspector polling can retry metadata */ });
+            }
+          },
         });
         failures = 0;
         if (signal.aborted) return;
@@ -296,6 +420,26 @@ export default function Workspace() {
     void attachRun(activeId, activeMessageId, activeRunId, creds.accessKey, controller.signal);
     return () => controller.abort();
   }, [activeId, activeRunId, activeMessageId, creds?.accessKey, attachRun]);
+
+  // Keep background state current so a comparison can advance while another
+  // conversation is selected. Detaching SSE never cancels a durable run.
+  const backgroundRunKey = conversations.flatMap((conversation) => conversation.messages.filter((message) => message.role === "assistant" && message.runId && ACTIVE_STATUSES.has(message.status ?? "") && (conversation.id !== activeId || message.id !== activeMessageId)).map((message) => `${conversation.id}:${message.id}:${message.runId}`)).join("|");
+  useEffect(() => {
+    if (!creds || !backgroundRunKey) return;
+    let alive = true, pending = false;
+    const poll = async () => {
+      if (pending) return;
+      pending = true;
+      const runs = convsRef.current.flatMap((conversation) => conversation.messages.filter((message) => message.role === "assistant" && message.runId && ACTIVE_STATUSES.has(message.status ?? "") && (conversation.id !== activeId || message.id !== activeMessageId)).map((message) => ({ conversationId: conversation.id, message })));
+      await Promise.allSettled(runs.map(async ({ conversationId, message }) => {
+        try { const snapshot = await getRun(message.runId!, creds.accessKey); if (alive) syncSnapshot(conversationId, message.id, snapshot); } catch { /* foreground recovery and health check expose connection status */ }
+      }));
+      pending = false;
+    };
+    void poll();
+    const timer = window.setInterval(poll, 2000);
+    return () => { alive = false; window.clearInterval(timer); };
+  }, [backgroundRunKey, activeId, activeMessageId, creds?.accessKey, syncSnapshot]);
 
   useEffect(() => {
     if (!creds?.accessKey || !orphanRequestKey) return;
@@ -359,19 +503,20 @@ export default function Workspace() {
     return conversation;
   }, []);
 
-  const launchRun = useCallback(async (conversationId: string, prompt: string, selectedTier: Tier, userMessageExists: boolean) => {
+  const launchRun = useCallback(async (conversationId: string, prompt: string, selectedTier: Tier, userMessageExists: boolean, research: ResearchRequest, nextTask?: Omit<ComparisonTask, "afterMessageId">) => {
     if (!creds) return;
     const conversation = convsRef.current.find((item) => item.id === conversationId);
     if (!conversation || pendingMessage(conversation)) return;
     const assistantId = newId();
     const requestId = newId();
+    browserObservers.current.set(assistantId, { start: performance.now(), delivery: { observedFrom: "submission" } });
     startingRequestsRef.current.add(requestId);
     const linkedUserId = [...conversation.messages].reverse().find((message) =>
       message.role === "user" && message.content === prompt && !message.clientRequestId,
     )?.id;
     const assistant: ChatMessage = {
       id: assistantId, role: "assistant", content: "", tier: selectedTier,
-      status: "queued", stage: "正在连接知识库…", clientRequestId: requestId, createdAt: Date.now(),
+      status: "queued", stage: "正在连接知识库…", clientRequestId: requestId, createdAt: Date.now(), research: { ...research, question: prompt },
     };
     const messages = userMessageExists
       ? [...conversation.messages.map((message) => message.id === linkedUserId
@@ -384,6 +529,7 @@ export default function Workspace() {
       tier: selectedTier,
       updatedAt: Date.now(),
       messages,
+      compareQueue: nextTask ? [{ ...nextTask, afterMessageId: assistantId }] : research.comparisonId && current.compareQueue?.[0]?.comparisonId === research.comparisonId ? current.compareQueue.slice(1) : current.compareQueue,
     }), true);
     try {
       const run = await createRun({
@@ -392,6 +538,10 @@ export default function Workspace() {
         conversationId,
         clientRequestId: requestId,
         apiKey: creds.llmApiKey,
+        accessKey: creds.accessKey,
+        research,
+        adminToken: adminToken || undefined,
+        comparisonParentRunId: research.comparisonParentRunId,
       });
       startingRequestsRef.current.delete(requestId);
       updateConversation(conversationId, (current) => ({
@@ -416,11 +566,34 @@ export default function Workspace() {
         setLoginError(apiError.message);
       }
     }
-  }, [creds, syncSnapshot, updateConversation, updateRunMessage]);
+  }, [creds, adminToken, syncSnapshot, updateConversation, updateRunMessage]);
+
+  const comparisonQueueKey = conversations.filter((conversation) => nextComparisonTask(conversation)).map((conversation) => `${conversation.id}:${conversation.compareQueue?.[0]?.afterMessageId}`).join("|");
+  useEffect(() => {
+    if (!creds || !comparisonQueueKey || !registry.systems.length) return;
+    for (const conversation of convsRef.current) {
+      const task = nextComparisonTask(conversation);
+      if (!task || comparisonLaunchingRef.current.has(conversation.id)) continue;
+      comparisonLaunchingRef.current.add(conversation.id);
+      if (!task.comparisonParentRunId) {
+        updateConversation(conversation.id, (current) => ({ ...current, compareQueue: current.compareQueue?.slice(1) }), true);
+        setNotice("比较任务未继续：系统 A 未返回运行 ID，无法复用冻结上下文。");
+        comparisonLaunchingRef.current.delete(conversation.id);
+        continue;
+      }
+      if (!canRunSystem(registry.systems.find((system) => system.id === task.systemId), task.tier)) {
+        updateConversation(conversation.id, (current) => ({ ...current, compareQueue: current.compareQueue?.slice(1) }), true);
+        setNotice(`比较任务未继续：系统 ${task.systemId} 当前不可运行。`);
+        comparisonLaunchingRef.current.delete(conversation.id);
+        continue;
+      }
+      void launchRun(conversation.id, task.prompt, task.tier, true, task).finally(() => comparisonLaunchingRef.current.delete(conversation.id));
+    }
+  }, [comparisonQueueKey, creds, registry.systems, launchRun, updateConversation]);
 
   const send = useCallback(() => {
     const prompt = input.trim();
-    if (!prompt || !creds || (active && pendingMessage(active))) return;
+    if (!prompt || !creds || !canSubmit || comparisonBusy || (active && pendingMessage(active))) return;
     const conversation = active ?? createConversation(tier);
     updateConversation(conversation.id, (current) => ({
       ...current,
@@ -432,35 +605,35 @@ export default function Workspace() {
     setInput("");
     draftsRef.current.delete(activeId ?? "new");
     stickRef.current = true;
-    void launchRun(conversation.id, prompt, tier, true);
-  }, [active, activeId, createConversation, creds, input, launchRun, tier, updateConversation]);
+    setSelectedMessageId(null);
+    setNotice("");
+    const research: ResearchRequest = { systemId, benchmarkId: questionSelection?.bank.id ?? "free", questionId: questionSelection?.question.id ?? null, protocolId: questionSelection?.bank.protocol_id || undefined, comparisonId: compare ? newId() : undefined, question: prompt, questionType: questionSelection?.question.type };
+    const secondTier = compareSystem?.tiers.find((value): value is Tier => ["flash", "pro", "max"].includes(value));
+    const nextTask = compare && compareSystem && secondTier ? { ...research, systemId: compareSystem.id, tier: secondTier, prompt } : undefined;
+    void launchRun(conversation.id, prompt, tier, true, research, nextTask);
+  }, [active, activeId, createConversation, creds, input, launchRun, tier, updateConversation, canSubmit, comparisonBusy, systemId, questionSelection, compare, compareSystem]);
 
   const stopActiveRun = useCallback(async () => {
-    if (!activeRunId || !creds) return;
+    if (!creds || !activeId) return;
+    updateConversation(activeId, (current) => ({ ...current, compareQueue: [] }), true);
+    if (!activeRunId) return;
     updateRunMessage(activeId ?? "", activeMessageId ?? "", (message) => ({ ...message, stage: "正在停止当前步骤…" }));
-    try { await cancelRun(activeRunId, creds.accessKey); } catch { /* stream reconnection will show the final state */ }
-  }, [activeId, activeMessageId, activeRunId, creds, updateRunMessage]);
+    try { await cancelRun(activeRunId, creds.accessKey); } catch (error) { setNotice(`停止请求未确认：${asApiError(error).message}`); }
+  }, [activeId, activeMessageId, activeRunId, creds, updateRunMessage, updateConversation]);
 
   const regenerate = useCallback((messageId: string) => {
-    if (!active || !creds || pendingMessage(active)) return;
+    if (!active || !creds || pendingMessage(active) || comparisonBusy) return;
     const index = active.messages.findIndex((message) => message.id === messageId);
     const user = [...active.messages.slice(0, index)].reverse().find((message) => message.role === "user");
     if (!user) return;
-    const oldRunId = active.messages[index]?.runId;
-    updateConversation(active.id, (current) => ({
-      ...current,
-      messages: current.messages.slice(0, index).map((message) => message.id === user.id
-        ? { ...message, runId: undefined, clientRequestId: undefined }
-        : message),
-      updatedAt: Date.now(),
-    }), true);
-    void (async () => {
-      if (oldRunId) {
-        try { await deleteRun(oldRunId, creds.accessKey); } catch { /* replacement can still run */ }
-      }
-      await launchRun(active.id, user.content, active.tier, true);
-    })();
-  }, [active, creds, launchRun, updateConversation]);
+    const original = active.messages[index];
+    const research = original.research ?? { systemId: original.experiment?.system_id ?? registry.defaults[original.tier ?? tier], benchmarkId: original.experiment?.benchmark_id ?? "free", questionId: original.experiment?.question_id ?? null, protocolId: original.experiment?.protocol_id ?? undefined };
+    const runTier = original.tier ?? tier;
+    if (!canRunSystem(registry.systems.find((system) => system.id === research.systemId), runTier)) { setNotice("此回答的系统版本当前不可运行，请在版本页选择可运行系统。"); return; }
+    setSelectedMessageId(null);
+    // A rerun is another observation, never a destructive replacement of history.
+    void launchRun(active.id, user.content, runTier, false, { ...research, comparisonId: undefined, comparisonParentRunId: original.runId });
+  }, [active, creds, launchRun, registry, tier, comparisonBusy]);
 
   const deleteMessage = useCallback((messageId: string) => {
     if (!active) return;
@@ -470,48 +643,38 @@ export default function Workspace() {
       message.runId === target.runId && message.role === "assistant" && ACTIVE_STATUSES.has(message.status ?? ""),
     ));
     if (running && !window.confirm("这条消息对应的回答仍在运行。删除会停止本轮任务，继续吗？")) return;
-    if (target.runId && creds) void deleteRun(target.runId, creds.accessKey);
+    if (target.runId && creds) void deleteRun(target.runId, creds.accessKey).catch((error) => setNotice(`本地消息已删除；服务端删除未确认：${asApiError(error).message}`));
     const removeIds = new Set([messageId]);
     if (running && target.role === "user" && target.runId) {
       active.messages.filter((message) => message.runId === target.runId).forEach((message) => removeIds.add(message.id));
     }
     updateConversation(active.id, (current) => ({
-      ...current, messages: current.messages.filter((message) => !removeIds.has(message.id)), updatedAt: Date.now(),
+      ...current, messages: current.messages.filter((message) => !removeIds.has(message.id)), compareQueue: current.compareQueue?.filter((task) => !removeIds.has(task.afterMessageId)), updatedAt: Date.now(),
     }), true);
   }, [active, creds, updateConversation]);
 
-  const exportConversation = useCallback(() => {
-    if (!active) return;
-    const content = [
-      `# ${active.title}`,
-      "",
-      ...active.messages.flatMap((message) => {
-        const heading = message.role === "user" ? "## 用户" : `## 助手${message.version ? ` · ${message.version}` : ""}`;
-        const sources = message.sources?.length
-          ? ["", "参考来源：", ...message.sources.map((source, index) => `- ${source.chapter || source.title || `片段 ${index + 1}`}${source.snippet ? `：${source.snippet}` : ""}`)]
-          : [];
-        return [heading, "", message.content || (message.error ? `（${message.error}）` : "（尚无正文）"), ...sources, ""];
-      }),
-    ].join("\n");
-    const blob = new Blob([content], { type: "text/markdown;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `${active.title.replace(/[\\/:*?"<>|]/g, "_").slice(0, 80) || "龙王传说对话"}.md`;
-    link.click();
-    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-  }, [active]);
+  const exportConversation = useCallback((conversation: Conversation, format: ExportFormat) => {
+    const report = exportBatch(conversation, format, [creds?.accessKey ?? "", creds?.llmApiKey ?? "", adminToken]);
+    downloadFile(`${conversation.title.slice(0, 80) || "研究批次"}.${format}`, report.content, report.mime);
+  }, [creds, adminToken]);
 
   const selectConversation = useCallback((id: string) => {
     draftsRef.current.set(activeId ?? "new", input);
     setInput(draftsRef.current.get(id) ?? "");
     setShowLatest(false);
     setActiveId(id);
+    setSelectedMessageId(null);
+    setQuestionSelection(null);
+    setView("history");
     setMobileOpen(false);
     const conversation = convsRef.current.find((item) => item.id === id);
-    if (conversation) setTier(conversation.tier);
+    if (conversation) {
+      setTier(conversation.tier);
+      const latest = [...conversation.messages].reverse().find((message) => message.role === "assistant");
+      setSystemId(latest?.research?.systemId ?? latest?.experiment?.system_id ?? registry.defaults[conversation.tier]);
+    }
     stickRef.current = true;
-  }, [activeId, input]);
+  }, [activeId, input, registry.defaults]);
 
   const renameConversation = useCallback((id: string, nextTitle: string) => {
     updateConversation(id, (conversation) => ({ ...conversation, title: nextTitle, updatedAt: Date.now() }), true);
@@ -571,13 +734,17 @@ export default function Workspace() {
 
   const handleTierChange = useCallback((nextTier: Tier) => {
     setTier(nextTier);
+    setSystemId(registry.defaults[nextTier]);
     if (active) updateConversation(active.id, (conversation) => ({ ...conversation, tier: nextTier }), true);
-  }, [active, updateConversation]);
+  }, [active, registry.defaults, updateConversation]);
 
   const newChat = useCallback(() => {
     draftsRef.current.set(activeId ?? "new", input);
     createConversation(tier);
     setInput("");
+    setQuestionSelection(null);
+    setSelectedMessageId(null);
+    setView("history");
     setShowLatest(false);
     setMobileOpen(false);
     stickRef.current = true;
@@ -587,6 +754,8 @@ export default function Workspace() {
   const disconnect = useCallback(() => {
     clearStoredCredentials();
     setCreds(null);
+    setAdminToken("");
+    setAdminExpires(null);
     setLoginError("");
   }, []);
 
@@ -601,81 +770,94 @@ export default function Workspace() {
     return () => window.removeEventListener("keydown", handler);
   }, [newChat, signedIn]);
 
-  const pickSuggestion = useCallback((text: string) => {
-    setInput(text);
+  const pickQuestion = useCallback((bank: Benchmark, question: BenchmarkQuestion) => {
+    if (question.runnable === false) return;
+    setInput(question.question);
+    setQuestionSelection({ bank, question });
+    setView("history");
     window.setTimeout(() => inputRef.current?.focus(), 20);
   }, []);
 
-  if (!hydrated || !signedIn) {
+  const signInAdmin = async (password: string) => {
+    if (!creds || adminBusy) return;
+    setAdminBusy(true); setAdminError("");
+    try {
+      const result = await loginAdmin(password, creds.accessKey);
+      if (secretsRef.current[0] !== creds.accessKey) return;
+      setAdminToken(result.token); setAdminExpires(result.expires_at); setAdminOpen(false);
+    } catch (error) { setAdminError(asApiError(error).message); }
+    finally { setAdminBusy(false); }
+  };
+
+  const rejudge = async () => {
+    if (!activeAssistant?.runId || !creds || !adminToken || evaluating) return;
+    setEvaluating(true); setExperimentError("");
+    try { await evaluateRun(activeAssistant.runId, creds.accessKey, adminToken); setExperimentRefresh((value) => value + 1); }
+    catch (error) { setExperimentError(asApiError(error).message); if (asApiError(error).kind === "auth") expireAdmin(); }
+    finally { setEvaluating(false); }
+  };
+
+  if (!hydrated || !signedIn || !creds) {
     return <LoginGate error={loginError} onSubmit={(apiKey, remember) => {
       setLoginError("");
       const next = { accessKey: apiKey, llmApiKey: apiKey };
       if (remember) saveStoredCredentials(next); else clearStoredCredentials();
       setCreds(next);
+      setAdminToken(""); setAdminExpires(null);
     }} />;
   }
 
   const connectionLabel = connection === "ready" ? "知识库已连接" : connection === "offline" ? "知识库离线" : "正在连接";
   return (
     <>
-      <AppShell
+      <WorkbenchShell
+        view={view}
+        onView={setView}
         conversations={visibleConversations}
         activeId={activeId}
-        title={title}
+        title={active?.title ?? "新建实验"}
         query={query}
+        onQuery={setQuery}
         collapsed={collapsed}
         mobileOpen={mobileOpen}
-        signedIn={signedIn}
+        inspectorOpen={evidenceOpen}
         connection={connectionLabel}
-        tier={tier}
-        evidence={evidence}
-        evidenceOpen={evidenceOpen}
-        onToggleEvidence={() => setEvidenceOpen((value) => !value)}
-        onExportConversation={exportConversation}
+        admin={Boolean(adminToken)}
+        onAdmin={() => setAdminOpen(true)}
+        onInspector={() => setEvidenceOpen((value) => !value)}
         onToggleCollapse={() => {
           setCollapsed(!collapsed);
           try { localStorage.setItem("dragon-legend.sidebar-collapsed", String(!collapsed)); } catch { /* optional preference */ }
         }}
-        onOpenMobileSidebar={() => setMobileOpen(true)}
-        onCloseMobileSidebar={() => setMobileOpen(false)}
-        onQueryChange={setQuery}
-        onNewChat={newChat}
-        onSelectConversation={selectConversation}
-        onRenameConversation={renameConversation}
-        onDeleteConversation={(id) => void removeConversation(id)}
-        onOpenSettings={() => setSettingsOpen(true)}
-        onClearHistory={() => setConfirmClearOpen(true)}
-        footer={
-          <Composer
-            value={input}
-            onChange={setInput}
-            onSend={send}
-            onStop={() => void stopActiveRun()}
-            busy={Boolean(activeRun)}
-            tier={tier}
-            onTierChange={handleTierChange}
-            inputRef={inputRef}
-          />
-        }
+        onMobile={setMobileOpen}
+        onNew={newChat}
+        onSelect={selectConversation}
+        onRename={renameConversation}
+        onDelete={(id) => void removeConversation(id)}
+        onSettings={() => setSettingsOpen(true)}
+        onClear={() => setConfirmClearOpen(true)}
+        inspector={<ExperimentInspector messages={assistantMessages} selectedId={activeAssistant?.id ?? null} onSelect={setSelectedMessageId} message={activeAssistant} admin={Boolean(adminToken)} onLogin={() => setAdminOpen(true)} onEvaluate={() => void rejudge()} evaluating={evaluating} error={experimentError} />}
       >
-        {connection !== "ready" ? (
-          <div role="status" className="flex items-center justify-between gap-3 border-b border-amber-300/10 bg-amber-300/[0.04] px-6 py-2 text-xs leading-5 text-amber-100/80">
-            <span>{connection === "offline" ? "暂时无法连接知识库。已保留对话，系统会自动重连。" : "正在连接或预热知识库，请稍候…"}</span>
-            <button type="button" className="shrink-0 underline underline-offset-4" onClick={() => setSettingsOpen(true)}>连接设置</button>
+        {notice && <div className="workspace-notice" role="status"><span>{notice}</span><button onClick={() => setNotice("")}>关闭</button></div>}
+        {view === "history" && <>
+          <div className="experiment-controls">
+            <div className="experiment-controls-heading"><div><span className="eyebrow">EXPERIMENT SETUP</span><h2>运行配置</h2></div><span className="status-badge">{questionSelection ? questionSelection.bank.label : "自由问题 · 在线诊断"}</span></div>
+            <div className="system-controls"><label className="stack-label tier-control">档位<select value={tier} onChange={(event) => handleTierChange(event.target.value as Tier)}><option value="flash">Flash</option><option value="pro">Pro</option><option value="max">Max</option></select></label><label className="stack-label system-control">系统 A<select value={systemId} onChange={(event) => setSystemId(event.target.value)}>{!compatibleSystems.some((system) => system.id === systemId) && <option value={systemId}>{systemId} · 等待注册表</option>}{compatibleSystems.map((system) => <option key={system.id} value={system.id} disabled={!canRunSystem(system, tier)}>{system.label}{system.status !== "runnable" ? ` · ${system.status === "pending" ? "待接入" : "历史归档"}` : ""}</option>)}</select></label><label className="compare-switch"><input type="checkbox" checked={compare} onChange={(event) => setCompare(event.target.checked)} />双系统比较</label></div>
+            {compare && <div className="compare-controls"><label className="stack-label system-control">系统 B · A 完成后运行<select value={compareSystemId} onChange={(event) => setCompareSystemId(event.target.value)}><option value="">选择第二个系统</option>{registry.systems.map((system) => <option key={system.id} value={system.id} disabled={system.status !== "runnable" || system.id === systemId || !system.tiers.some((value) => ["flash", "pro", "max"].includes(value))}>{system.label} · {system.family}{system.status !== "runnable" ? ` · ${system.status}` : ""}</option>)}</select></label><p className="muted">相同问题与协议，顺序运行；两次生成均使用你的 BYOK。</p></div>}
+            <div className="setup-caption"><span>{questionSelection ? `${questionSelection.question.id} · 协议 ${questionSelection.bank.protocol_id || "未记录"}` : "自由问题仅作在线诊断，不计入基准成绩。"}</span><button onClick={() => setView("benchmarks")}>从基准题库选择 ↗</button></div>
+            <dl className="setup-metadata" aria-label="配置摘要"><div><dt>档位</dt><dd>{tier.toUpperCase()}</dd></div><div><dt>版本</dt><dd>{selectedSystem?.version || "未记录"}</dd></div><div><dt>变体</dt><dd>{selectedSystem?.variant || "未记录"}</dd></div><div><dt>所选运行模型</dt><dd>{activeAssistant?.experiment?.system_id === systemId ? activeAssistant.experiment.generation_model || "运行时记录" : "运行时记录"}</dd></div><div><dt>协议</dt><dd>{questionSelection?.bank.protocol_id || benchmarks.find((bank) => bank.id === "free")?.protocol_id || "未记录"}</dd></div></dl>
+            {registryError && <p className="inline-error">注册表加载失败：{registryError} <button onClick={() => setRegistryRefresh((value) => value + 1)}>重试</button></p>}
           </div>
-        ) : null}
-        <ChatView
-          messages={active?.messages ?? []}
-          onPick={pickSuggestion}
-          onRegenerate={regenerate}
-          onDeleteMessage={deleteMessage}
-          scrollRef={scrollRef}
-          bottomRef={bottomRef}
-          onScroll={onScroll}
-          showLatest={showLatest}
-          onLatest={scrollToLatest}
-        />
-      </AppShell>
+          <div className="thread-toolbar"><span>{active?.messages.filter((message) => message.role === "user").length ?? 0} 个问题 · {assistantMessages.length} 次回答</span><div>{active && <button onClick={() => exportConversation(active, "md")}>导出本批次 ↓</button>}<button onClick={() => setView("reports")}>全部报告 ↗</button></div></div>
+          <ChatView messages={active?.messages ?? []} onPick={() => setView("benchmarks")} onRegenerate={regenerate} onDeleteMessage={deleteMessage} scrollRef={scrollRef} bottomRef={bottomRef} onScroll={onScroll} showLatest={showLatest} onLatest={scrollToLatest} onInspect={(id) => { setSelectedMessageId(id); setEvidenceOpen(true); }} selectedId={activeAssistant?.id} busy={Boolean(activeRun) || comparisonBusy} comparisonPending={comparisonBusy} />
+          <div className="research-composer"><div className="research-composer-input"><textarea ref={inputRef} value={input} rows={3} maxLength={4000} aria-label="输入研究问题" placeholder="输入需要检索、核对或比较的问题…" onChange={(event) => { setInput(event.target.value); if (questionSelection && event.target.value !== questionSelection.question.question) setQuestionSelection(null); }} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); send(); } }} /><div className="composer-actions"><span>{activeRun || comparisonBusy ? "任务在后台继续，切换会话可随时回来。" : `${input.length}/4000 · Enter 运行，Shift + Enter 换行`}</span>{activeRun || comparisonBusy ? <button className="quiet-button" onClick={() => void stopActiveRun()}>停止{comparisonBusy ? "比较" : "运行"}</button> : <button className="primary-button" disabled={!input.trim() || !canSubmit} onClick={send}>{compare ? "顺序比较 A → B" : "运行实验"}<span aria-hidden="true"> ↑</span></button>}</div></div><p className="composer-footnote"><span className={`status-dot ${connection === "ready" ? "ready" : ""}`} />{connectionLabel} · {adminToken ? "管理员评测会话" : "访客模式 · 不发起付费评测"}</p></div>
+        </>}
+        {view === "versions" && <VersionsPanel systems={registry.systems} error={registryError} onRetry={() => setRegistryRefresh((value) => value + 1)} onUse={(system: ResearchSystem) => { const selectedTier = system.tiers.find((value): value is Tier => ["flash", "pro", "max"].includes(value)); if (!selectedTier) return; handleTierChange(selectedTier); setSystemId(system.id); setView("history"); }} />}
+        {view === "benchmarks" && <BenchmarksPanel benchmarks={benchmarks} onPick={pickQuestion} error={benchmarkError} />}
+        {view === "reports" && <ReportsPanel conversations={conversations} onExport={exportConversation} onSelect={selectConversation} accessKey={creds.accessKey} adminToken={adminToken} onLogin={() => setAdminOpen(true)} onAdminExpired={expireAdmin} />}
+      </WorkbenchShell>
+
+      <AdminDialog open={adminOpen} authenticated={Boolean(adminToken)} configured={adminConfigured} busy={adminBusy} error={adminError} onLogin={(password) => void signInAdmin(password)} onLogout={() => { setAdminToken(""); setAdminExpires(null); setAdminError(""); }} onClose={() => setAdminOpen(false)} />
 
       <SettingsDialog
         open={settingsOpen}
@@ -684,6 +866,7 @@ export default function Workspace() {
           const next = { accessKey: apiKey, llmApiKey: apiKey };
           if (remember) saveStoredCredentials(next); else clearStoredCredentials();
           setCreds(next);
+          setAdminToken(""); setAdminExpires(null);
         }}
         onDisconnect={disconnect}
         onClose={() => setSettingsOpen(false)}

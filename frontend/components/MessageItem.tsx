@@ -2,15 +2,8 @@
 
 import { memo, useEffect, useState } from "react";
 import { Markdown } from "@/lib/markdown";
-import type { ChatMessage, Tier } from "@/lib/types";
-import SourceDrawer from "./SourceDrawer";
+import type { ChatMessage } from "@/lib/types";
 import { CheckIcon, CopyIcon, RefreshIcon, TrashIcon } from "./icons";
-
-const TIER_LABEL: Record<Tier, string> = {
-  flash: "Flash · v1.9 sem_select",
-  pro: "Pro · v2.5 Pro",
-  max: "Max · v3.1 MAX",
-};
 
 function LiveStatus({ message }: { message: ChatMessage }) {
   const [elapsed, setElapsed] = useState(0);
@@ -42,9 +35,10 @@ interface Props {
   message: ChatMessage;
   onRegenerate?: (messageId: string) => void;
   onDelete?: (messageId: string) => void;
+  onInspect?: (messageId: string) => void;
 }
 
-function MessageItemImpl({ message, onRegenerate, onDelete }: Props) {
+function MessageItemImpl({ message, onRegenerate, onDelete, onInspect }: Props) {
   const [copied, setCopied] = useState(false);
   const [copyError, setCopyError] = useState(false);
   const copy = async () => {
@@ -72,26 +66,20 @@ function MessageItemImpl({ message, onRegenerate, onDelete }: Props) {
         </button>
       ) : null}
       {copyError ? <span role="status" className="text-xs text-amber-200">复制失败，请手动选择正文复制</span> : null}
+      {message.role === "assistant" && onInspect && <button type="button" className="message-action" onClick={() => onInspect(message.id)}>实验详情 ↗</button>}
     </div>
   );
 
   if (message.role === "user") {
     return (
-      <div className="group animate-fade-in">
-        <div className="flex justify-end">
-          <div className="max-w-[82%] whitespace-pre-wrap rounded-2xl rounded-br-md border border-white/[0.06] bg-[#20242B] px-4 py-3 text-[14px] leading-6 text-ink sm:max-w-[76%]">
-            {message.content}
-          </div>
-        </div>
-        <div className="flex justify-end">{actions}</div>
-      </div>
+      <div className="group"><span className="eyebrow">QUESTION</span><p className="research-question-text">{message.content}</p>{actions}</div>
     );
   }
 
   const active = ["queued", "running", "streaming", "reviewing"].includes(message.status ?? "");
   return (
     <article className="group animate-fade-in">
-      {message.tier ? <div className="mb-1.5 text-[10.5px] font-medium tracking-wide text-gold-500/80">{message.version || TIER_LABEL[message.tier]}</div> : null}
+      <div className="answer-heading"><span>{message.experiment?.system_snapshot?.label || message.experiment?.system_id || message.research?.systemId || message.version || "未记录版本"}</span><span className="status-badge">{message.status ?? "未记录"}</span></div>
       {active ? <LiveStatus message={message} /> : null}
       {message.provisional && message.content ? <div className="mb-2 inline-flex rounded-full border border-gold-500/20 bg-gold-500/[0.07] px-2 py-0.5 text-[10.5px] text-gold-300">待核验草稿</div> : null}
       {message.content ? <div className="relative"><Markdown text={message.content} />{message.status === "streaming" ? <span className="ml-0.5 inline-block h-[15px] w-[2px] translate-y-[2px] animate-pulse bg-gold-400 align-baseline" /> : null}</div> : null}
@@ -99,12 +87,11 @@ function MessageItemImpl({ message, onRegenerate, onDelete }: Props) {
       {message.status === "interrupted" ? <p className="mt-1 rounded-xl border border-amber-500/20 bg-amber-500/[0.06] px-3 py-2 text-[12px] leading-5 text-amber-100/80">{message.error || "服务重启导致任务中断，已保留已生成内容。"}</p> : null}
       {message.status === "error" ? <p className="mt-1.5 rounded-xl border border-red-500/25 bg-red-500/[0.07] px-3 py-2 text-[12px] leading-5 text-red-200/90">{message.error || "生成失败，请重试。"}</p> : null}
       {message.warning ? <p className="mt-2 rounded-xl border border-amber-500/20 bg-amber-500/[0.05] px-3 py-2 text-[12px] leading-5 text-amber-100/80">{message.warning}{message.completionStatus && message.completionStatus !== "complete" ? `（${message.completionStatus}）` : ""}</p> : null}
-      {!active ? actions : null}
-      {!active && message.sources?.length ? <SourceDrawer sources={message.sources} /> : null}
+      {actions}
     </article>
   );
 }
 
 export default memo(MessageItemImpl, (previous, next) =>
-  previous.message === next.message && previous.onRegenerate === next.onRegenerate && previous.onDelete === next.onDelete,
+  previous.message === next.message && previous.onRegenerate === next.onRegenerate && previous.onDelete === next.onDelete && previous.onInspect === next.onInspect,
 );

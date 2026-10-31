@@ -1,10 +1,11 @@
 import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
 import "./globals.css";
+import "./workbench.css";
 
 export const metadata: Metadata = {
-  title: "龙王传说 · 考据助手",
-  description: "基于完整知识库回答《斗罗大陆III 龙王传说》的人物、剧情、设定与关系问题，并提供参考来源。",
+  title: "龙王传说 · 研究工作台",
+  description: "可追溯的 RAG 实验工作台：系统版本、基准题库、答案比较、证据核对、独立评测与批次报告。",
 };
 
 export const viewport: Viewport = {

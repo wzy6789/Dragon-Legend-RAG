@@ -35,11 +35,11 @@ export default function LoginGate({ onSubmit, error, busy }: Props) {
         <div className="max-w-md">
           <div className="flex items-baseline gap-2">
             <h1 className="font-serif text-[30px] leading-tight text-ink">龙王传说</h1>
-            <span className="text-[11.5px] tracking-[0.2em] text-gold-500">考据助手</span>
+            <span className="text-[11.5px] tracking-[0.2em] text-gold-500">研究工作台</span>
           </div>
-          <p className="mt-3 text-[14px] leading-6 text-ink-muted">完整知识库考据助手</p>
+          <p className="mt-3 text-[14px] leading-6 text-ink-muted">可追溯的 RAG 实验工作区</p>
           <p className="mt-1.5 text-[13px] leading-6 text-ink-muted">
-            使用自己的 DeepSeek API Key，直接连接完整知识库。
+            使用自己的 DeepSeek API Key，运行版本对比、证据核对与基准实验。
           </p>
         </div>
       </div>
@@ -112,7 +112,7 @@ export default function LoginGate({ onSubmit, error, busy }: Props) {
                 : "cursor-not-allowed bg-white/[0.05] text-ink-faint")
             }
           >
-            {busy ? "连接中…" : "连接并开始对话"}
+            {busy ? "连接中…" : "进入研究工作台"}
           </button>
 
           <p className="mt-4 text-[11.5px] leading-5 text-ink-faint">

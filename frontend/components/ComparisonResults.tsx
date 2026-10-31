@@ -1,0 +1,9 @@
+"use client";
+
+import type { ChatMessage } from "@/lib/types";
+import { compareResults, displayValue } from "@/lib/workbench";
+
+export default function ComparisonResults({ messages, comparisonId }: { messages: ChatMessage[]; comparisonId: string }) {
+  const result = compareResults(messages, comparisonId);
+  return <div className="comparison-results"><div className="comparison-heading"><span>比较结果 · 原始评分</span><span>差值方向 B − A</span></div><div className="report-table-scroll"><table className="research-data-table"><thead><tr><th>系统</th><th>题库 / 协议</th><th>评审模型 / 题型</th><th>原始分数</th></tr></thead><tbody>{result.entries.map(({ message, evaluation }, index) => <tr key={message.id}><td><span className="table-primary">{String.fromCharCode(65 + index)} · {message.experiment?.system_id ?? message.research?.systemId ?? "未记录"}</span><span>{evaluation?.status ?? "未记录"}</span></td><td><span className="table-primary">{message.experiment?.benchmark_id === "free" ? "自由问题 · 在线诊断" : message.experiment?.benchmark_id ?? "未记录"}</span><span>{displayValue(evaluation?.protocol_id)}</span></td><td><span className="table-primary">{displayValue(evaluation?.judge_model)}</span><span>{displayValue(evaluation?.type)}</span></td><td>{typeof evaluation?.score === "number" && Number.isFinite(evaluation.score) ? evaluation.score : "未记录"}{typeof evaluation?.score_scale === "number" && Number.isFinite(evaluation.score_scale) && <span>满分 {evaluation.score_scale}</span>}</td></tr>)}</tbody></table></div>{result.comparable ? <p className="comparison-verdict">{result.entries[0]?.message.experiment?.benchmark_id === "free" ? "在线诊断分差" : "同协议分差"}（B − A）：<strong>{result.delta! > 0 ? "+" : ""}{Number(result.delta!.toFixed(6))}</strong><span>仅表示本题差值。</span></p> : <div className="comparison-incomparable"><strong>不可比 · 不计算分差</strong><ul>{result.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul></div>}</div>;
+}
