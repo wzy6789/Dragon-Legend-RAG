@@ -13,13 +13,22 @@ import types
 
 # id, generation, caption, source package, config manifest, rebased
 VERSIONS = (
-    ('flash-v20-original', '20', '初版', 'data/flash20/experiments/20261027-evening/source/src/flash20', 'flash-2.0_full_20261027_evening', False),
-    ('flash-v20', '20', '质量修正版', 'data/flash20/experiments/20261027-quality-eval-full/source', 'flash-2.0_quality_full_20261027_r1', False),
-    ('flash-v21-r3', '21', '语境恢复版', 'data/flash21/backups/20261029-before-field-routing/src/flash21', 'flash-2.1_full_20261028_r3', False),
-    ('flash-v21', '21', '代表版 · 单次证据视图', 'data/flash21/dev/20261029-readiness-cold/code-snapshot', 'flash-2.1_full_20261029_ready_r1', False),
-    ('flash-v22-frozen-r1', '22', '冻结 r1 · 质量代表', 'data/flash22/releases/flash-2.2_20261030_candidate_r1/code/flash22', 'flash-2.2_full_20261030_frozen_r1', True),
-    ('flash-v22-frozen-r2', '22', '冻结 r2 · 速度代表', 'data/flash22/releases/flash-2.2_20261031_candidate_r2/code/flash22', 'flash-2.2_full_20261031_frozen_r2', True),
+    ('flash-v20-original', '20', 'budget_rag', 'data/flash20/experiments/20261027-evening/source/src/flash20', 'flash-2.0_full_20261027_evening', False),
+    ('flash-v20', '20', 'evidence_select', 'data/flash20/experiments/20261027-quality-eval-full/source', 'flash-2.0_quality_full_20261027_r1', False),
+    ('flash-v21-r3', '21', 'context_repair', 'data/flash21/backups/20261029-before-field-routing/src/flash21', 'flash-2.1_full_20261028_r3', False),
+    ('flash-v21', '21', 'single_view', 'data/flash21/dev/20261029-readiness-cold/code-snapshot', 'flash-2.1_full_20261029_ready_r1', False),
+    ('flash-v22-frozen-r1', '22', 'scene_memory', 'data/flash22/releases/flash-2.2_20261030_candidate_r1/code/flash22', 'flash-2.2_full_20261030_frozen_r1', True),
+    ('flash-v22-frozen-r2', '22', 'facet_binding', 'data/flash22/releases/flash-2.2_20261031_candidate_r2/code/flash22', 'flash-2.2_full_20261031_frozen_r2', True),
 )
+
+FEATURE_DESCRIPTIONS = {
+    'budget_rag': '预算约束的批次检索与单次生成。',
+    'evidence_select': '题意和多轮对象恢复，按相关性改进证据选择。',
+    'context_repair': '恢复回答所需的原文语境。',
+    'single_view': '单次证据视图，减少重复输入。',
+    'scene_memory': '继承多轮场景、实体与约束。',
+    'facet_binding': '按问题分句分配证据并绑定主体。',
+}
 
 
 def read(path):
@@ -39,7 +48,7 @@ def entries(root):
                    source=source, status='runnable' if available else 'archive',
                    config={'adapter': 'modern_flash', 'number': number, 'rebased': rebased,
                            'parameters': config, 'source': source},
-                   notes='按该版代码与配置运行，使用本机当前资料；运行成绩不等于历史成绩。',
+                   notes=FEATURE_DESCRIPTIONS[caption]+'按该版代码与配置运行，使用本机当前资料；运行成绩不等于历史成绩。',
                    results=[f'results/flashbench/{run}'], code_fingerprint=fingerprint)
 
 
