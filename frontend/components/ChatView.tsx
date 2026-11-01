@@ -4,7 +4,7 @@ import type { RefObject } from "react";
 import type { ChatMessage } from "@/lib/types";
 import EmptyState from "./EmptyState";
 import MessageItem from "./MessageItem";
-import ComparisonResults from "./ComparisonResults";
+import ComparisonGroup from "./ComparisonGroup";
 
 interface Props {
   messages: ChatMessage[];
@@ -19,7 +19,7 @@ interface Props {
   onInspect: (id: string) => void;
   selectedId?: string;
   busy: boolean;
-  comparisonPending?: boolean;
+  pendingComparison?: { comparisonId?: string; label: string };
 }
 
 export default function ChatView({
@@ -35,7 +35,7 @@ export default function ChatView({
   onInspect,
   selectedId,
   busy,
-  comparisonPending,
+  pendingComparison,
 }: Props) {
   const empty = messages.length === 0;
 
@@ -50,8 +50,7 @@ export default function ChatView({
             const groupId = m.role === "assistant" ? m.research?.comparisonId : undefined;
             if (groupId) {
               if (messages.slice(0, index).some((message) => message.role === "assistant" && message.research?.comparisonId === groupId)) return null;
-              const group = messages.filter((message) => message.role === "assistant" && message.research?.comparisonId === groupId);
-              return <section className="comparison-group" key={groupId}><div className="comparison-heading"><span>顺序比较</span><span>A → B · 相同问题与协议</span></div><div className="comparison-grid">{group.map((message, position) => <div key={message.id} className={selectedId === message.id ? "answer-card is-selected" : "answer-card"}><span className="comparison-position">系统 {String.fromCharCode(65 + position)}</span><MessageItem message={message} onRegenerate={busy ? undefined : onRegenerate} onDelete={onDeleteMessage} onInspect={onInspect} /></div>)}{group.length === 1 && comparisonPending && <div className="comparison-waiting"><span className="comparison-position">系统 B</span><p>等待系统 A 结束后运行</p><span>切换会话后仍将继续</span></div>}</div><ComparisonResults messages={messages} comparisonId={groupId} /></section>;
+              return <ComparisonGroup key={groupId} messages={messages} comparisonId={groupId} pendingLabel={pendingComparison?.comparisonId===groupId ? pendingComparison.label : undefined} busy={busy} selectedId={selectedId} onInspect={onInspect} onRegenerate={onRegenerate} onDelete={onDeleteMessage} />;
             }
             return <div key={m.id} className={m.role === "assistant" ? `answer-card ${selectedId === m.id ? "is-selected" : ""}` : "question-block"}><MessageItem message={m} onRegenerate={busy ? undefined : onRegenerate} onDelete={onDeleteMessage} onInspect={onInspect} /></div>;
           })}
@@ -61,7 +60,7 @@ export default function ChatView({
     </div>
     {showLatest && !empty ? (
       <button type="button" onClick={onLatest} className="latest-button" aria-label="回到最新回答">
-        <span aria-hidden="true">↓</span> 回到最新回答
+         回到最新回答
       </button>
     ) : null}
     </div>

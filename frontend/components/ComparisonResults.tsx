@@ -1,9 +1,28 @@
 "use client";
+import type { Evaluation } from "@/lib/types";
+import { compareResults, comparisonSides, compareExecution, displayValue, evaluationLabel, formatMs, systemLabel } from "@/lib/workbench";
 
-import type { ChatMessage } from "@/lib/types";
-import { compareResults, displayValue } from "@/lib/workbench";
-
-export default function ComparisonResults({ messages, comparisonId }: { messages: ChatMessage[]; comparisonId: string }) {
-  const result = compareResults(messages, comparisonId);
-  return <div className="comparison-results"><div className="comparison-heading"><span>比较结果 · 原始评分</span><span>差值方向 B − A</span></div><div className="report-table-scroll"><table className="research-data-table"><thead><tr><th>系统</th><th>题库 / 协议</th><th>评审模型 / 题型</th><th>原始分数</th></tr></thead><tbody>{result.entries.map(({ message, evaluation }, index) => <tr key={message.id}><td><span className="table-primary">{String.fromCharCode(65 + index)} · {message.experiment?.system_id ?? message.research?.systemId ?? "未记录"}</span><span>{evaluation?.status ?? "未记录"}</span></td><td><span className="table-primary">{message.experiment?.benchmark_id === "free" ? "自由问题 · 在线诊断" : message.experiment?.benchmark_id ?? "未记录"}</span><span>{displayValue(evaluation?.protocol_id)}</span></td><td><span className="table-primary">{displayValue(evaluation?.judge_model)}</span><span>{displayValue(evaluation?.type)}</span></td><td>{typeof evaluation?.score === "number" && Number.isFinite(evaluation.score) ? evaluation.score : "未记录"}{typeof evaluation?.score_scale === "number" && Number.isFinite(evaluation.score_scale) && <span>满分 {evaluation.score_scale}</span>}</td></tr>)}</tbody></table></div>{result.comparable ? <p className="comparison-verdict">{result.entries[0]?.message.experiment?.benchmark_id === "free" ? "在线诊断分差" : "同协议分差"}（B − A）：<strong>{result.delta! > 0 ? "+" : ""}{Number(result.delta!.toFixed(6))}</strong><span>仅表示本题差值。</span></p> : <div className="comparison-incomparable"><strong>不可比 · 不计算分差</strong><ul>{result.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul></div>}</div>;
+function value(e?: Evaluation) {
+  if (typeof e?.score !== "number" || !Number.isFinite(e.score)) return evaluationLabel(e);
+  return `${Number(e.score.toFixed(2))}${typeof e.score_scale === "number" ? ` / ${e.score_scale}` : ""}`;
+}
+function valid(n: unknown): n is number { return typeof n === "number" && Number.isFinite(n) && n >= 0; }
+export default function ComparisonResults({ result }: { result: ReturnType<typeof compareResults> }) {
+  const timing = compareExecution(result.entries);
+  const entries = comparisonSides(result.entries);
+  const maxTime = Math.max(...entries.map(e => e?.message.experiment?.metrics?.execution_ms).filter(valid), 1);
+  const quality = result.comparable ? result.delta === 0 ? "本题质量评分相同" : `${result.delta! > 0 ? "B" : "A"} 高 ${Number(Math.abs(result.delta!).toFixed(2))} 分` : "等待可比评分";
+  return <section className="comparison-results comparison-summary" aria-label="质量与速度对照"><div className="comparison-overview">
+    <div className="compare-metric"><div className="compare-metric-title"><span>回答质量</span><span className="metric-tag">{result.entries[0]?.message.experiment?.benchmark_id === "free" ? "在线诊断" : "协议评测"}</span></div><h3>{quality}</h3>
+      <div className="paired-meters">{entries.map((entry,i)=>{const e=entry?.evaluation,scale=e?.score_scale;const usable=evaluationLabel(e)==="已评分"&&valid(e?.score)&&valid(scale)&&scale>0&&e.score<=scale;return <div className={`paired-meter series-${i}`} key={i}><span className="series-key">{i?"B":"A"}</span><div className="meter-track" aria-hidden="true">{usable&&<span style={{width:`${e!.score!/scale!*100}%`}}/>}</div><strong>{value(e)}</strong></div>;})}</div><p>{result.comparable ? "相同题目、上下文、裁判与评分标准" : "评分完成且口径一致后显示分差"}</p>
+    </div>
+    <div className="compare-metric"><div className="compare-metric-title"><span>回答速度</span><span className="metric-tag">不含排队</span></div><h3>{timing.delta===undefined?"等待完整耗时":timing.delta===0?"本次耗时相同":`${timing.delta<0?"B":"A"} 少用 ${formatMs(Math.abs(timing.delta))}`}</h3>
+      <div className="paired-meters">{entries.map((entry,i)=>{const time=entry?.message.experiment?.metrics?.execution_ms;return <div className={`paired-meter series-${i}`} key={i}><span className="series-key">{i?"B":"A"}</span><div className="meter-track" aria-hidden="true">{valid(time)&&<span style={{width:`${time/maxTime*100}%`}}/>}</div><strong>{formatMs(time)}</strong></div>;})}</div><p>柱长代表本次执行耗时，越短越快</p>
+    </div></div>
+    <details className="comparison-numbers"><summary>查看原始数据与比较条件</summary><div className="report-table-scroll"><table className="research-data-table comparison-matrix"><caption className="sr-only">两个版本的原始数据</caption><thead><tr><th>指标</th>{entries.map((e,i)=><th key={i}><span className={`series-key series-${i}`}>{i?"B":"A"}</span> {e?systemLabel(e.message):"等待记录"}</th>)}</tr></thead><tbody>
+      {([["服务端首段 · 含排队","ttft_ms"],["执行 · 不含排队","execution_ms"],["排队","queue_ms"],["总耗时 · 含排队","e2e_ms"]] as const).map(([label,key])=><tr key={key}><th scope="row">{label}</th>{entries.map((e,i)=><td key={i}>{formatMs(e?.message.experiment?.metrics?.[key])}</td>)}</tr>)}<tr><th scope="row">原始评分</th>{entries.map((e,i)=><td key={i}>{value(e?.evaluation)}</td>)}</tr></tbody></table></div>
+      {!result.comparable&&<ul className="comparison-reasons">{result.reasons.map(reason=><li key={reason}>{reason}</li>)}</ul>}{timing.reason&&<p className="muted">{timing.reason}</p>}
+      <div className="comparison-protocols">{entries.map((e,i)=>e&&<dl key={e.message.id}><dt>{i?"B":"A"} 的评测口径</dt><dd>协议：{displayValue(e.evaluation?.protocol_id)}</dd><dd>裁判：{displayValue(e.evaluation?.judge_model)}</dd><dd>题型：{displayValue(e.evaluation?.type)}</dd></dl>)}</div>
+    </details>
+  </section>;
 }

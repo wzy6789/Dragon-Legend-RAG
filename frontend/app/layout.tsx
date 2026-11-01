@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
 import "./globals.css";
 import "./workbench.css";
+import "./experiment-visuals.css";
 
 export const metadata: Metadata = {
   title: "龙王传说 · 研究工作台",

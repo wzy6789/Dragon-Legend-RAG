@@ -6,7 +6,7 @@ import { clearConversations, deleteConversation as deleteConversationRow, listCo
 import { clearStoredCredentials, loadStoredCredentials, saveStoredCredentials, loadStoredAdminSession, saveStoredAdminSession, clearStoredAdminSession } from "@/lib/credential-store";
 import { filterConversations, makeTitle } from "@/lib/history";
 import type { ApiError, Benchmark, BenchmarkQuestion, BrowserDelivery, ChatMessage, ComparisonTask, Conversation, ResearchRequest, ResearchSystem, RunEvent, RunSnapshot, SystemRegistry, Tier } from "@/lib/types";
-import { canRunSystem, DEFAULT_SYSTEMS, downloadFile, exportBatch, nextComparisonTask, shouldPollExperiment, withoutCredentials, type ExportFormat } from "@/lib/workbench";
+import { inspectionTargets, canRunSystem, DEFAULT_SYSTEMS, downloadFile, exportBatch, nextComparisonTask, shouldPollExperiment, withoutCredentials, type ExportFormat } from "@/lib/workbench";
 import WorkbenchShell, { type WorkbenchView } from "./WorkbenchShell";
 import ExperimentInspector from "./ExperimentInspector";
 import AdminDialog from "./AdminDialog";
@@ -100,6 +100,7 @@ export default function Workspace() {
   const recoveringRef = useRef<Set<string>>(new Set());
   const startingRequestsRef = useRef<Set<string>>(new Set());
   const stickRef = useRef(true);
+  const positionedComparisonRef = useRef("");
   const draftsRef = useRef<Map<string, string>>(new Map());
   const [showLatest, setShowLatest] = useState(false);
   const comparisonLaunchingRef = useRef<Set<string>>(new Set());
@@ -256,37 +257,47 @@ export default function Workspace() {
     return () => window.clearTimeout(timer);
   }, [adminToken, adminExpires, expireAdmin]);
 
-  // Independent from the generation stream: completed answers may still be judged.
+  const inspectedRuns = inspectionTargets(active?.messages ?? [], activeAssistant?.id).map(message => `${message.id}|${message.runId}`).join(",");
+  // Both answers in a comparison receive independent scoring updates.
   useEffect(() => {
-    if (!creds || !activeId || !activeAssistant?.runId) return;
+    if (!creds || !activeId || !inspectedRuns) return;
     const controller = new AbortController();
-    const conversationId = activeId, messageId = activeAssistant.id, runId = activeAssistant.runId;
-    let timer: number | undefined;
-    setExperimentError("");
-    const poll = async () => {
-      let again = true;
-      try {
-        const experiment = await getExperiment(runId, creds.accessKey, controller.signal);
-        if (controller.signal.aborted) return;
-        updateRunMessage(conversationId, messageId, (message) => ({ ...message, experiment: withoutCredentials(experiment, secretsRef.current) as typeof experiment }));
-        setExperimentError("");
-        const latest = convsRef.current.find((conversation) => conversation.id === conversationId)?.messages.find((message) => message.id === messageId);
-        again = shouldPollExperiment(latest?.status, experiment);
-      } catch (error) {
-        if (!controller.signal.aborted) {
-          const apiError = asApiError(error);
-          const latest = convsRef.current.find((conversation) => conversation.id === conversationId)?.messages.find((message) => message.id === messageId);
-          if (apiError.status === 404 && !latest?.experiment && !ACTIVE_STATUSES.has(latest?.status ?? "")) {
-            again = false; setExperimentError("");
-          } else setExperimentError(`实验记录暂未同步：${apiError.message}`);
-        }
-      }
-      if (again && !controller.signal.aborted) timer = window.setTimeout(poll, 2000);
+    const conversationId = activeId;
+    const timers = new Set<number>();
+    const syncErrors = new Map<string, string>();
+    const reportSync = (runId: string, error?: string) => {
+      if (error) syncErrors.set(runId, error); else syncErrors.delete(runId);
+      setExperimentError(Array.from(syncErrors.values()).join("；"));
     };
-    void poll();
-    return () => { controller.abort(); window.clearTimeout(timer); };
-  }, [activeId, activeAssistant?.id, activeAssistant?.runId, creds?.accessKey, experimentRefresh, updateRunMessage]);
-
+    setExperimentError("");
+    for (const pair of inspectedRuns.split(",")) {
+      const [messageId, runId] = pair.split("|");
+      const poll = async () => {
+        let again = true;
+        try {
+          const experiment = await getExperiment(runId, creds.accessKey, controller.signal);
+          if (controller.signal.aborted) return;
+          reportSync(runId);
+          updateRunMessage(conversationId, messageId, message => ({ ...message, experiment: withoutCredentials(experiment, secretsRef.current) as typeof experiment }));
+          const latest = convsRef.current.find(c => c.id === conversationId)?.messages.find(m => m.id === messageId);
+          again = shouldPollExperiment(latest?.status, experiment);
+        } catch (error) {
+          if (!controller.signal.aborted) {
+            const apiError = asApiError(error);
+            const latest = convsRef.current.find(c => c.id === conversationId)?.messages.find(m => m.id === messageId);
+            if (apiError.status === 404 && !latest?.experiment && !ACTIVE_STATUSES.has(latest?.status ?? "")) { again = false; reportSync(runId); }
+            else reportSync(runId, `实验记录暂未同步：${apiError.message}`);
+          }
+        }
+        if (again && !controller.signal.aborted) {
+          const timer = window.setTimeout(() => { timers.delete(timer); void poll(); }, 2500);
+          timers.add(timer);
+        }
+      };
+      void poll();
+    }
+    return () => { controller.abort(); timers.forEach(timer => window.clearTimeout(timer)); };
+  }, [activeId, inspectedRuns, creds?.accessKey, experimentRefresh, updateRunMessage]);
   useEffect(() => {
     if (!active) return;
     setTier(active.tier);
@@ -294,22 +305,41 @@ export default function Workspace() {
 
   useEffect(() => {
     if (!stickRef.current) return;
-    bottomRef.current?.scrollIntoView({ block: "end" });
+    const comparisonId=active?.messages.at(-1)?.research?.comparisonId;
+    if (comparisonId) {
+      const key=active.id+":"+comparisonId;
+      const group=Array.from(scrollRef.current?.querySelectorAll<HTMLElement>("[data-comparison-id]") ?? []).find(node=>node.dataset.comparisonId===comparisonId);
+      if (group?.classList.contains("is-stacked") && group.dataset.view === "answers") {
+        bottomRef.current?.scrollIntoView({block:"end"});
+      } else if (positionedComparisonRef.current!==key) {
+        group?.scrollIntoView({block:"start"});
+        positionedComparisonRef.current=key;
+      }
+    } else {
+      positionedComparisonRef.current="";
+      bottomRef.current?.scrollIntoView({ block: "end" });
+    }
   }, [active?.messages]);
 
   const onScroll = useCallback(() => {
     const el = scrollRef.current;
     if (el) {
       stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
-      setShowLatest(!stickRef.current);
+      const latest=convsRef.current.find(c=>c.id===activeId)?.messages.at(-1);
+      const group=latest?.research?.comparisonId ? Array.from(el.querySelectorAll<HTMLElement>("[data-comparison-id]")).find(node=>node.dataset.comparisonId===latest.research?.comparisonId) : undefined;
+      const box=group?.getBoundingClientRect(), viewport=el.getBoundingClientRect();
+      setShowLatest(box && !group?.classList.contains("is-stacked") ? box.bottom<viewport.top || box.top>viewport.bottom : !stickRef.current);
     }
-  }, []);
+  }, [activeId]);
 
   const scrollToLatest = useCallback(() => {
     stickRef.current = true;
     setShowLatest(false);
-    bottomRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });
-  }, []);
+    const comparisonId=convsRef.current.find(c=>c.id===activeId)?.messages.at(-1)?.research?.comparisonId;
+    const group=comparisonId ? Array.from(scrollRef.current?.querySelectorAll<HTMLElement>("[data-comparison-id]") ?? []).find(node=>node.dataset.comparisonId===comparisonId) : undefined;
+    if(group && !group.classList.contains("is-stacked")) group.scrollIntoView({block:"start",behavior:"smooth"});
+    else bottomRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });
+  }, [activeId]);
 
   const applyEvent = useCallback((conversationId: string, messageId: string, type: string, event: RunEvent) => {
     const seq = Number(event.seq ?? 0);
@@ -578,9 +608,10 @@ export default function Workspace() {
       const task = nextComparisonTask(conversation);
       if (!task || comparisonLaunchingRef.current.has(conversation.id)) continue;
       comparisonLaunchingRef.current.add(conversation.id);
-      if (!task.comparisonParentRunId) {
+      const predecessor = conversation.messages.find((message) => message.id === task.afterMessageId);
+      if (!task.comparisonParentRunId || predecessor?.status !== "done") {
         updateConversation(conversation.id, (current) => ({ ...current, compareQueue: current.compareQueue?.slice(1) }), true);
-        setNotice("比较任务未继续：系统 A 未返回运行 ID，无法复用冻结上下文。");
+        setNotice(predecessor?.status !== "done" ? "系统 A 未完成，本组对比已停止；已有内容已保留，B 未启动。" : "比较任务未继续：系统 A 未返回运行 ID，无法复用冻结上下文。");
         comparisonLaunchingRef.current.delete(conversation.id);
         continue;
       }
@@ -854,9 +885,9 @@ export default function Workspace() {
             {questionSelection && <div className="selected-question">{questionSelection.bank.label} · {questionSelection.question.id}</div>}
             {registryError && <p className="inline-error">注册表加载失败：{registryError} <button onClick={() => setRegistryRefresh((value) => value + 1)}>重试</button></p>}
           </div>
-          {!!assistantMessages.length && active && <div className="thread-toolbar"><button onClick={() => exportConversation(active, "md")}>导出对话 ↓</button></div>}
-          <ChatView messages={active?.messages ?? []} onPick={() => setView("benchmarks")} onRegenerate={regenerate} onDeleteMessage={deleteMessage} scrollRef={scrollRef} bottomRef={bottomRef} onScroll={onScroll} showLatest={showLatest} onLatest={scrollToLatest} onInspect={(id) => { setSelectedMessageId(id); setEvidenceOpen(true); }} selectedId={activeAssistant?.id} busy={Boolean(activeRun) || comparisonBusy} comparisonPending={comparisonBusy} />
-          <div className="research-composer"><div className="research-composer-input"><textarea ref={inputRef} value={input} rows={2} maxLength={4000} aria-label="输入研究问题" title="Enter 发送，Shift + Enter 换行" placeholder="输入问题…" onChange={(event) => { setInput(event.target.value); if (questionSelection && event.target.value !== questionSelection.question.question) setQuestionSelection(null); }} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); send(); } }} /><div className="composer-actions"><span>{activeRun || comparisonBusy ? "后台运行中" : input.length >= 3200 ? `${input.length}/4000` : ""}</span>{activeRun || comparisonBusy ? <button className="quiet-button" onClick={() => void stopActiveRun()}>停止</button> : <button className="primary-button" disabled={!input.trim() || !canSubmit} onClick={send}>{compare ? "开始对比" : "发送"}<span aria-hidden="true"> ↑</span></button>}</div></div></div>
+          {!!assistantMessages.length && active && <div className="thread-toolbar"><button onClick={() => exportConversation(active, "md")}>导出对话</button></div>}
+          <ChatView messages={active?.messages ?? []} onPick={() => setView("benchmarks")} onRegenerate={regenerate} onDeleteMessage={deleteMessage} scrollRef={scrollRef} bottomRef={bottomRef} onScroll={onScroll} showLatest={showLatest} onLatest={scrollToLatest} onInspect={(id) => { setSelectedMessageId(id); setEvidenceOpen(true); }} selectedId={activeAssistant?.id} busy={Boolean(activeRun) || comparisonBusy} pendingComparison={active?.compareQueue?.[0] ? { comparisonId: active.compareQueue[0].comparisonId, label: registry.systems.find((s) => s.id === active.compareQueue?.[0]?.systemId)?.label || active.compareQueue[0].systemId } : undefined} />
+          <div className="research-composer"><div className="research-composer-input"><textarea ref={inputRef} value={input} rows={2} maxLength={4000} aria-label="输入研究问题" title="Enter 发送，Shift + Enter 换行" placeholder="输入问题…" onChange={(event) => { setInput(event.target.value); if (questionSelection && event.target.value !== questionSelection.question.question) setQuestionSelection(null); }} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); send(); } }} /><div className="composer-actions"><span>{activeRun || comparisonBusy ? "后台运行中" : input.length >= 3200 ? `${input.length}/4000` : ""}</span>{activeRun || comparisonBusy ? <button className="quiet-button" onClick={() => void stopActiveRun()}>停止</button> : <button className="primary-button" disabled={!input.trim() || !canSubmit} onClick={send}>{compare ? "开始对比" : "发送"}</button>}</div></div></div>
         </>}
         {view === "versions" && <VersionsPanel systems={registry.systems} error={registryError} onRetry={() => setRegistryRefresh((value) => value + 1)} onUse={(system: ResearchSystem) => { const selectedTier = system.tiers.find((value): value is Tier => ["flash", "pro", "max"].includes(value)); if (!selectedTier) return; handleTierChange(selectedTier); setSystemId(system.id); setView("history"); }} />}
         {view === "benchmarks" && <BenchmarksPanel benchmarks={benchmarks} onPick={pickQuestion} error={benchmarkError} />}

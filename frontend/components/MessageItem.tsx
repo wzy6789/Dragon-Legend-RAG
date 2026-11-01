@@ -3,7 +3,9 @@
 import { memo, useEffect, useState } from "react";
 import { Markdown } from "@/lib/markdown";
 import type { ChatMessage } from "@/lib/types";
-import { CheckIcon, CopyIcon, RefreshIcon, TrashIcon } from "./icons";
+import { CheckIcon, CopyIcon, TrashIcon } from "./icons";
+import { formatMs, evaluationLabel } from "@/lib/workbench";
+import RunJourney from "./RunJourney";
 
 function LiveStatus({ message }: { message: ChatMessage }) {
   const [elapsed, setElapsed] = useState(0);
@@ -36,9 +38,10 @@ interface Props {
   onRegenerate?: (messageId: string) => void;
   onDelete?: (messageId: string) => void;
   onInspect?: (messageId: string) => void;
+  hideHeading?: boolean;
 }
 
-function MessageItemImpl({ message, onRegenerate, onDelete, onInspect }: Props) {
+function MessageItemImpl({ message, onRegenerate, onDelete, onInspect, hideHeading }: Props) {
   const [copied, setCopied] = useState(false);
   const [copyError, setCopyError] = useState(false);
   const copy = async () => {
@@ -57,7 +60,7 @@ function MessageItemImpl({ message, onRegenerate, onDelete, onInspect }: Props) 
       </button>
       {message.role === "assistant" && onRegenerate && message.status !== "streaming" && message.status !== "queued" && message.status !== "running" && message.status !== "reviewing" ? (
         <button type="button" onClick={() => onRegenerate(message.id)} aria-label="重新生成" title="重新生成" className="message-action">
-          <RefreshIcon className="h-3.5 w-3.5" /><span className="sr-only">重新生成</span>
+          <span>重新运行</span>
         </button>
       ) : null}
       {onDelete ? (
@@ -77,10 +80,13 @@ function MessageItemImpl({ message, onRegenerate, onDelete, onInspect }: Props) 
   }
 
   const active = ["queued", "running", "streaming", "reviewing"].includes(message.status ?? "");
+  const evaluation = message.experiment?.evaluations?.at(-1);
   return (
     <article className="group animate-fade-in">
-      <div className="answer-heading"><span>{message.experiment?.system_snapshot?.label || message.experiment?.system_id || message.research?.systemId || message.version || "未记录版本"}</span></div>
+      {!hideHeading && <div className="answer-heading"><span>{message.experiment?.system_snapshot?.label || message.experiment?.system_id || message.research?.systemId || message.version || "未记录版本"}</span></div>}
+      {!hideHeading && <div className="answer-measurements"><span>服务端首段 <b>{formatMs(message.experiment?.metrics?.ttft_ms)}</b></span><span>完成 <b>{formatMs(message.experiment?.metrics?.e2e_ms)}</b></span><button onClick={()=>onInspect?.(message.id)} disabled={!onInspect}>质量 <b>{evaluationLabel(evaluation)==="已评分" && typeof evaluation?.score === "number" ? `${Number(evaluation.score.toFixed(2))}${evaluation.score_scale ? ` / ${evaluation.score_scale}` : ""}` : evaluationLabel(evaluation)}</b></button></div>}
       {active ? <LiveStatus message={message} /> : null}
+      <RunJourney message={message} compact />
       {message.provisional && message.content ? <div className="mb-2 inline-flex rounded-full border border-gold-500/20 bg-gold-500/[0.07] px-2 py-0.5 text-[13px] text-gold-300">待核验草稿</div> : null}
       {message.content ? <div className="relative"><Markdown text={message.content} />{message.status === "streaming" ? <span className="ml-0.5 inline-block h-[15px] w-[2px] translate-y-[2px] animate-pulse bg-gold-400 align-baseline" /> : null}</div> : null}
       {message.status === "stopped" ? <p className="mt-1 text-[14px] text-ink-faint">{message.error || "已停止生成。"}</p> : null}
@@ -93,5 +99,5 @@ function MessageItemImpl({ message, onRegenerate, onDelete, onInspect }: Props) 
 }
 
 export default memo(MessageItemImpl, (previous, next) =>
-  previous.message === next.message && previous.onRegenerate === next.onRegenerate && previous.onDelete === next.onDelete && previous.onInspect === next.onInspect,
+  previous.message === next.message && previous.onRegenerate === next.onRegenerate && previous.onDelete === next.onDelete && previous.onInspect === next.onInspect && previous.hideHeading === next.hideHeading,
 );

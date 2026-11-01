@@ -11,6 +11,13 @@ export function canRunSystem(system: Pick<ResearchSystem, "status" | "tiers"> | 
   return system?.status === "runnable" && system.tiers.includes(tier);
 }
 
+export function inspectionTargets(messages: ChatMessage[], selectedId?: string): ChatMessage[] {
+  const selected = messages.find(message => message.id === selectedId);
+  if (!selected) return [];
+  const group = selected.research?.comparisonId;
+  return messages.filter(message => message.role === "assistant" && message.runId && (message.id === selected.id || !!group && message.research?.comparisonId === group));
+}
+
 export function shouldPollExperiment(status: string | undefined, experiment: Experiment | undefined): boolean {
   if (!GENERATION_TERMINAL.has(status ?? "")) return true;
   const evaluations = experiment?.evaluations;
@@ -98,6 +105,43 @@ export function summarizeReport(rows: ReportRun[], excludeQueue: boolean) {
 }
 
 export interface ComparisonEntry { message: ChatMessage; question: string | null; evaluation?: Evaluation }
+export function systemLabel(message: ChatMessage): string {
+  return message.experiment?.system_snapshot?.label || message.experiment?.system_id || message.research?.systemId || message.version || "未记录版本";
+}
+
+export function comparisonSides(entries: ComparisonEntry[]): [ComparisonEntry | undefined, ComparisonEntry | undefined] {
+  // If A was deleted, retain B's original role instead of relabeling it A.
+  return entries.length === 1 && entries[0].message.research?.comparisonParentRunId
+    ? [undefined, entries[0]] : [entries[0], entries[1]];
+}
+
+export function comparisonRunStatus(message: ChatMessage): string {
+  if (message.status === "done" && message.completionStatus && message.completionStatus !== "complete") return "部分完成";
+  return message.status ? ({ queued: "排队中", running: "运行中", streaming: "回答中", reviewing: "核验中", done: "已完成", error: "失败", stopped: "已停止", interrupted: "已中断" })[message.status] ?? "未记录" : "未记录";
+}
+
+/** Observed execution delta only; score comparability remains independent. */
+export function compareExecution(entries: ComparisonEntry[]): { delta?: number; reason?: string } {
+  if (entries.length !== 2) return { reason: "等待两份完整回答" };
+  const [a,b]=entries;
+  if (!entries.every(({message:m})=>m.status === "done" && (!m.completionStatus || m.completionStatus === "complete"))) return { reason: "两次回答尚未完整完成" };
+  if (!a.question || a.question !== b.question) return { reason: "问题未确认一致" };
+  const ea=a.message.experiment, eb=b.message.experiment;
+  if (!ea?.context_hash?.trim() || ea.context_hash !== eb?.context_hash) return { reason: "上下文未确认一致" };
+  if (!ea?.benchmark_id || ea.benchmark_id !== eb?.benchmark_id || (ea.benchmark_id !== "free" && (!ea.question_id || ea.question_id !== eb?.question_id))) return { reason: "题目口径未确认一致" };
+  const left=ea.metrics?.execution_ms, right=eb?.metrics?.execution_ms;
+  return finiteTiming(left) && finiteTiming(right) ? { delta: right-left } : { reason: "执行耗时未记录完整" };
+}
+
+export function evaluationLabel(evaluation?: Evaluation): string {
+  const status=evaluation?.status;
+  if (!status || status === "not_authorized") return "未评分";
+  if (["pending_generation","queued"].includes(status)) return "等待评分";
+  if (["running","scoring","judging"].includes(status)) return "评分中";
+  if (["done","completed","complete","success","succeeded"].includes(status)) return "已评分";
+  return "评分未完成";
+}
+
 export function compareResults(messages: ChatMessage[], comparisonId: string): { entries: ComparisonEntry[]; comparable: boolean; reasons: string[]; delta?: number } {
   let question: string | null = null;
   const entries: ComparisonEntry[] = [];

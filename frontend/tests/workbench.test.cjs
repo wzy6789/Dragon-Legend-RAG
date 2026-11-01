@@ -10,6 +10,13 @@ require.extensions['.ts'] = (module, filename) => {
 const workbench = require('../lib/workbench.ts');
 const api = require('../lib/api.ts');
 
+test('comparison inspection synchronizes both peers but no unrelated runs', () => {
+  const messages=[{id:'a',role:'assistant',runId:'ra',research:{comparisonId:'pair'}},{id:'b',role:'assistant',runId:'rb',research:{comparisonId:'pair'}},{id:'c',role:'assistant',runId:'rc'}];
+  assert.deepEqual(workbench.inspectionTargets(messages,'b').map(x=>x.id),['a','b']);
+  assert.deepEqual(workbench.inspectionTargets(messages,'c').map(x=>x.id),['c']);
+  assert.deepEqual(workbench.inspectionTargets(messages,'deleted'),[]);
+});
+
 test('defaults are exact and pending/archive systems never become runnable', () => {
   assert.deepEqual(workbench.DEFAULT_SYSTEMS, { flash: 'flash-v19-sem_select', pro: 'pro-v25', max: 'max-v31' });
   assert.equal(workbench.canRunSystem({ status: 'archive', tiers: ['flash'] }, 'flash'), false);
@@ -161,6 +168,40 @@ test('score delta requires recorded matching question, context, bank, protocol, 
   const missing = workbench.compareResults(messages.slice(0, 2), 'pair');
   assert.equal(missing.delta, undefined);
   assert.ok(missing.reasons.length);
+});
+
+test('execution comparison uses matched complete runs and never substitutes missing time with zero', () => {
+  const messages = comparisonMessages();
+  messages[1].experiment.metrics = { execution_ms: 2000, queue_ms: 0 };
+  messages[2].experiment.metrics = { execution_ms: 1600, queue_ms: 9000 };
+  const entries = workbench.compareResults(messages, 'pair').entries;
+  assert.equal(workbench.compareExecution(entries).delta, -400);
+  for (const mutation of [
+    m => m.status = 'stopped', m => m.status = 'error', m => m.completionStatus = 'partial',
+    m => m.experiment.context_hash = '', m => m.experiment.context_hash = 'different',
+    m => m.research.question = 'another question', m => m.experiment.question_id = '2',
+    m => m.experiment.benchmark_id = 'free', m => delete m.experiment.metrics.execution_ms,
+    m => m.experiment.metrics.execution_ms = NaN, m => m.experiment.metrics.execution_ms = -1,
+  ]) {
+    const copy = structuredClone(messages); mutation(copy[2]);
+    assert.equal(workbench.compareExecution(workbench.compareResults(copy,'pair').entries).delta, undefined);
+  }
+  messages[1].experiment.metrics.execution_ms = 0;
+  messages[2].experiment.metrics.execution_ms = 0;
+  assert.equal(workbench.compareExecution(workbench.compareResults(messages,'pair').entries).delta,0);
+});
+
+test('comparison preserves B identity after A is removed and keeps missing scores distinct', () => {
+  const messages = comparisonMessages();
+  messages[2].research.comparisonParentRunId = 'parent-a';
+  const entries = workbench.compareResults([messages[0],messages[2]],'pair').entries;
+  const sides = workbench.comparisonSides(entries);
+  assert.equal(sides[0],undefined); assert.equal(sides[1].message.id,messages[2].id);
+  assert.equal(workbench.evaluationLabel(undefined),'未评分');
+  assert.equal(workbench.evaluationLabel({status:'not_authorized'}),'未评分');
+  assert.equal(workbench.evaluationLabel({status:'running'}),'评分中');
+  assert.equal(workbench.comparisonRunStatus({status:'done',completionStatus:'partial'}),'部分完成');
+  assert.equal(workbench.comparisonRunStatus({status:'stopped'}),'已停止');
 });
 
 test('incomparable comparisons retain raw scores and explain each mismatched or missing field', () => {
