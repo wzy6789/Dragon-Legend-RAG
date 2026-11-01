@@ -332,6 +332,12 @@ export default function Workspace() {
     }
   }, [activeId]);
 
+  useEffect(() => {
+    if (view !== "history" || !selectedMessageId) return;
+    const card = Array.from(scrollRef.current?.querySelectorAll<HTMLElement>("[data-message-id]") ?? []).find(node => node.dataset.messageId === selectedMessageId);
+    card?.scrollIntoView({block:"nearest",inline:"nearest"});
+  }, [activeId, selectedMessageId, view]);
+
   const scrollToLatest = useCallback(() => {
     stickRef.current = true;
     setShowLatest(false);
@@ -898,7 +904,7 @@ export default function Workspace() {
         </>}
         {view === "versions" && <VersionsPanel systems={registry.systems} error={registryError} onRetry={() => setRegistryRefresh((value) => value + 1)} onUse={(system: ResearchSystem) => { const selectedTier = system.tiers.find((value): value is Tier => ["flash", "pro", "max"].includes(value)); if (!selectedTier) return; handleTierChange(selectedTier); setSystemId(system.id); setView("history"); }} />}
         {view === "benchmarks" && <BenchmarksPanel benchmarks={benchmarks} onPick={pickQuestion} error={benchmarkError} />}
-        {view === "reports" && <ReportsPanel conversations={conversations} onExport={exportConversation} onSelect={selectConversation} accessKey={creds.accessKey} adminToken={adminToken} onLogin={() => setAdminOpen(true)} onAdminExpired={expireAdmin} />}
+        {view === "reports" && <ReportsPanel conversations={conversations} onExport={exportConversation} onSelect={selectConversation} onInspect={(conversationId,messageId)=>{selectConversation(conversationId);setSelectedMessageId(messageId);setEvidenceOpen(true)}} accessKey={creds.accessKey} adminToken={adminToken} onLogin={() => setAdminOpen(true)} onAdminExpired={expireAdmin} />}
       </WorkbenchShell>
 
       <AdminDialog open={adminOpen} authenticated={Boolean(adminToken)} configured={adminConfigured} busy={adminBusy} error={adminError} onLogin={(password) => void signInAdmin(password)} onLogout={() => { if (creds && adminToken) void logoutAdmin(creds.accessKey, adminToken).catch(() => setNotice("当前浏览器已退出；服务端会话暂未撤销，请恢复连接后重试。")); clearStoredAdminSession(); setAdminToken(""); setAdminExpires(null); setAdminError(""); }} onClose={() => setAdminOpen(false)} />

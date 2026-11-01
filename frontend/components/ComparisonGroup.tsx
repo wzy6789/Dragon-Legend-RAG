@@ -69,7 +69,7 @@ export default function ComparisonGroup(p: Props) {
         const letter=index===0?"A":"B";
         if (!entry) return <div className="comparison-waiting" key={letter}><span className="comparison-letter">{letter}</span><h3>{index===1 && p.pendingLabel ? p.pendingLabel : `系统 ${letter}`}</h3><p>{index===1 && p.pendingLabel ? "等待 A 结束后开始" : "本组尚无对应回答记录"}</p></div>;
         const message=entry.message;
-        return <div key={message.id} className={`answer-card comparison-answer series-${index}${p.selectedId===message.id?" is-selected":""}`}>
+        return <div key={message.id} data-message-id={message.id} className={`answer-card comparison-answer series-${index}${p.selectedId===message.id?" is-selected":""}`}>
           <header className="comparison-answer-heading"><div><span className="comparison-letter">{letter}</span><h3>{systemLabel(message)}</h3></div><div className="comparison-answer-actions"><span className="status-badge">{comparisonRunStatus(message)}</span><span>服务端首段 {formatMs(message.experiment?.metrics?.ttft_ms)}</span><button type="button" onClick={()=>p.onInspect(message.id)}>查看证据与详情</button></div></header>
           <div className="comparison-answer-scroll" ref={el=>{panes.current[index]=el;}} onScroll={e=>onScroll(index,e)} tabIndex={0} role="region" aria-label={`${letter} 的回答`}>
             <MessageItem message={message} hideHeading onRegenerate={p.busy?undefined:p.onRegenerate} onDelete={p.onDelete} />

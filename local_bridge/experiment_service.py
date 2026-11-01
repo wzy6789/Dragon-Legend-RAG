@@ -491,6 +491,13 @@ class ExperimentService:
             usage = json.loads(evaluation["usage_json"])
             usage["calls"] = evaluation["calls"]
             frozen = json.loads(evaluation["input_json"])
+            if row["benchmark_id"] == "new49" and not result.get("type"):
+                # Read compatibility only: use this run's frozen scoring data,
+                # never today's bank or a fresh model classification.
+                original = frozen.get("scoring") or json.loads(row["scoring_json"])
+                profile = (original.get("_rubric") or {}).get("profile") if isinstance(original, dict) else None
+                if isinstance(profile, str) and profile.strip():
+                    result["type"] = profile
             identity = frozen.get("scorer") or {}
             records.append({"id": evaluation["id"], "status": evaluation["status"], "judge_model": evaluation["judge_model"],
                 "protocol_id": evaluation["protocol_id"], "score": None, "dimensions": {}, "weights": {}, "reasons": {},
@@ -743,7 +750,7 @@ class ExperimentService:
                         raise Malformed("invalid claim diagnostics")
                 obj["_has_sources"] = bool(data["sources"])
                 calculated = scorer["score"](obj, rubric)
-                result = {"score": calculated["final_score"], "score_scale": 100, "dimensions": calculated["dimensions"],
+                result = {"type": rubric["profile"], "score": calculated["final_score"], "score_scale": 100, "dimensions": calculated["dimensions"],
                           "weights": scorer["TYPE_WEIGHTS"][rubric["profile"]], "reasons": obj.get("short_reason", ""),
                           "raw": obj, "calculation": calculated, "comp_mode": "gold_atoms"}
             elif bank == "legacy50":

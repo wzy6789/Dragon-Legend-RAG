@@ -5,6 +5,7 @@ import "./workbench.css";
 import "./experiment-visuals.css";
 import "./reading-lab.css";
 import "./experiment-navigation.css";
+import "./experiment-analysis.css";
 
 export const metadata: Metadata = {
   title: "龙王传说 · 研究工作台",

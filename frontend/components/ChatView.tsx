@@ -52,7 +52,7 @@ export default function ChatView({
               if (messages.slice(0, index).some((message) => message.role === "assistant" && message.research?.comparisonId === groupId)) return null;
               return <ComparisonGroup key={groupId} messages={messages} comparisonId={groupId} pendingLabel={pendingComparison?.comparisonId===groupId ? pendingComparison.label : undefined} busy={busy} selectedId={selectedId} onInspect={onInspect} onRegenerate={onRegenerate} onDelete={onDeleteMessage} />;
             }
-            return <div key={m.id} className={m.role === "assistant" ? `answer-card ${selectedId === m.id ? "is-selected" : ""}` : "question-block"}><MessageItem message={m} onRegenerate={busy ? undefined : onRegenerate} onDelete={onDeleteMessage} onInspect={onInspect} /></div>;
+            return <div key={m.id} data-message-id={m.id} className={m.role === "assistant" ? `answer-card ${selectedId === m.id ? "is-selected" : ""}` : "question-block"}><MessageItem message={m} onRegenerate={busy ? undefined : onRegenerate} onDelete={onDeleteMessage} onInspect={onInspect} /></div>;
           })}
           <div ref={bottomRef} />
         </div>

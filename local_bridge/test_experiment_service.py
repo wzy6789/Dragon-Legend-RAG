@@ -486,6 +486,18 @@ class ExperimentServiceTests(unittest.TestCase):
         self.assertIn("Actual supporting passage.", fake.calls[0]["messages"][0]["content"])
         self.assertEqual(result["dimensions"]["comp"], 10.0)
         self.assertEqual(result["protocol_id"], "SCORING_STANDARD_7D49_R2")
+        self.assertEqual(result["type"], "L1")
+        # Historical results omitted type. Recover it only from the original
+        # frozen rubric, without rejudging or rewriting the stored score.
+        with self.bridge._run_db() as db:
+            saved = json.loads(db.execute("SELECT result_json FROM experiment_evaluations WHERE id=?", (result["id"],)).fetchone()[0])
+            saved.pop("type", None)
+            old_json = json.dumps(saved)
+            db.execute("UPDATE experiment_evaluations SET result_json=? WHERE id=?", (old_json, result["id"]))
+        with patch.object(self.service, "_bank", side_effect=AssertionError("must not use today's question bank")):
+            self.assertEqual(self.latest()["type"], "L1")
+        with self.bridge._run_db() as db:
+            self.assertEqual(db.execute("SELECT result_json FROM experiment_evaluations WHERE id=?", (result["id"],)).fetchone()[0], old_json)
         spec = importlib.util.spec_from_file_location("reference_7d49", SOURCE_ROOT / "src/evaluate_7d49.py")
         module = importlib.util.module_from_spec(spec)
         # Its config import has no network side effects; avoid executing the CLI.
