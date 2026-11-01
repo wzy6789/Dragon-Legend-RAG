@@ -141,3 +141,17 @@
   .answer-measurements { gap: 10px 18px; }
 }
 @media (prefers-reduced-motion: reduce) { .research-shell *, .research-shell *::before, .research-shell *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }
+
+/* Keep A left and B right at every reading width, including an open inspector. */
+.side-by-side .comparison-columns { max-width: 100%; overflow-x: auto; overscroll-behavior-x: contain; padding-bottom: 8px; }
+.side-by-side .comparison-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); min-width: 720px; gap: 20px; }
+.side-by-side .compare-identity-legend { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 20px; }
+.side-by-side .compare-identity-legend > div { min-width: 0; overflow-wrap: anywhere; }
+.side-by-side .comparison-answer-scroll { height: clamp(340px, 60dvh, 760px); max-height: none; }
+@media (min-width: 768px) {
+  .side-by-side .comparison-overview { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .side-by-side .comparison-overview > .compare-metric + .compare-metric { border-left: 1px solid #ffffff14; border-top: 0; }
+}
+@media (max-width: 767px) {
+  .side-by-side .comparison-grid { min-width: 640px; gap: 16px; }
+}

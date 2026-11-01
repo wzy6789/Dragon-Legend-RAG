@@ -18,6 +18,8 @@ test('comparison renders stable identities, visible quality/speed difference and
  const html=render(React.createElement(ComparisonGroup,{messages:[answer('version-a',78,8000),answer('version-b',89,11000)],comparisonId:'pair',busy:false,onInspect(){},onRegenerate(){},onDelete(){}}));
  for(const text of ['B 高 11 分','A 少用','评分维度','执行过程','series-0','series-1','version-a','version-b'])assert.ok(html.includes(text),text);
  assert.equal(/[→←↗↓↑⇒↔]/u.test(html),false);
+ assert.match(html,/comparison-group side-by-side/);
+ assert.doesNotMatch(html,/上下阅读|答案阅读布局/);
 });
 test('zero is rendered as a valid meter; missing and unknown scales do not fabricate bars',()=>{
  const html=render(React.createElement(ScoreVisual,{evaluation:{...evaluate(0),dimensions:{rel:0}}}));

@@ -20,7 +20,6 @@ interface Props {
 }
 
 export default function ComparisonGroup(p: Props) {
-  const [stacked, setStacked] = useState(false);
   const [sync, setSync] = useState(false);
   const [view, setView] = useState<"answers" | "scores" | "journey">("answers");
   const panes = useRef<(HTMLDivElement | null)[]>([]);
@@ -45,7 +44,7 @@ export default function ComparisonGroup(p: Props) {
       syncTargets.current.delete(index);
       if (Math.abs(pane.scrollTop-expected)<2) return;
     }
-    if (!sync || stacked) return;
+    if (!sync) return;
     const other=panes.current[1-index];
     if (!other || pane.scrollHeight<=pane.clientHeight) return;
     const top=pane.scrollTop/(pane.scrollHeight-pane.clientHeight)*Math.max(0,other.scrollHeight-other.clientHeight);
@@ -53,22 +52,18 @@ export default function ComparisonGroup(p: Props) {
     syncTargets.current.set(1-index,top);
     other.scrollTop=top;
   };
-  return <section className={`comparison-group${stacked?" is-stacked":""}`} data-comparison-id={p.comparisonId} data-view={view} aria-label="A/B 答案对比">
+  return <section className="comparison-group side-by-side" data-comparison-id={p.comparisonId} data-view={view} aria-label="A/B 答案对比">
     <div className="comparison-toolbar">
       <div><h2>同题对比</h2><p>{active || p.pendingLabel ? "先运行 A，再运行 B" : "两份回答，一组可追溯的实验"}</p></div>
       <div className="comparison-reading-controls">
-        <div className="comparison-layout" role="group" aria-label="答案阅读布局">
-          <button type="button" aria-pressed={!stacked} onClick={()=>setStacked(false)}>并排</button>
-          <button type="button" aria-pressed={stacked} onClick={()=>setStacked(true)}>上下阅读</button>
-        </div>
-        <label className="comparison-sync" title="按两份答案各自的阅读进度同步"><input type="checkbox" checked={sync} disabled={stacked} onChange={e=>{syncTargets.current.clear();setSync(e.target.checked);}} />同步滚动</label>
+        <label className="comparison-sync" title="按两份答案各自的阅读进度同步"><input type="checkbox" checked={sync} onChange={e=>{syncTargets.current.clear();setSync(e.target.checked);}} />同步滚动</label>
       </div>
     </div>
     <div className="compare-identity-legend">{sides.map((e,i)=><div key={i} className={`series-${i}`}><span className="series-key">{i?"B":"A"}</span><span>{e?systemLabel(e.message):p.pendingLabel || "等待回答"}</span></div>)}</div>
     <ComparisonResults result={result} />
     <div className="compare-view-tabs" role="group" aria-label="对比内容">{([{id:"answers",label:"完整回答"},{id:"scores",label:"评分维度"},{id:"journey",label:"执行过程"}] as const).map(item=><button key={item.id} aria-pressed={view===item.id} onClick={()=>setView(item.id)}>{item.label}</button>)}</div>
-    {view !== "answers" && <div className="comparison-grid comparison-analytics">{sides.map((e,i)=><section className={`compare-analysis-panel series-${i}`} key={i}><h3><span className="series-key">{i?"B":"A"}</span>{e?systemLabel(e.message):"等待回答"}</h3>{e ? view === "scores" ? <ScoreVisual evaluation={e.evaluation} /> : <RunJourney message={e.message} /> : <p className="muted">本组尚无对应记录</p>}</section>)}</div>}
-    <div hidden={view !== "answers"}>
+    {view !== "answers" && <div className="comparison-columns" role="region" aria-label="左右评分与过程对照" tabIndex={0}><div className="comparison-grid comparison-analytics">{sides.map((e,i)=><section className={`compare-analysis-panel series-${i}`} key={i}><h3><span className="series-key">{i?"B":"A"}</span>{e?systemLabel(e.message):"等待回答"}</h3>{e ? view === "scores" ? <ScoreVisual evaluation={e.evaluation} /> : <RunJourney message={e.message} /> : <p className="muted">本组尚无对应记录</p>}</section>)}</div></div>}
+    <div className="comparison-columns" hidden={view !== "answers"} role="region" aria-label="左右答案对照" tabIndex={0}>
     <div className="comparison-grid">
       {sides.map((entry,index)=>{
         const letter=index===0?"A":"B";
