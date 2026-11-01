@@ -3,6 +3,18 @@ import type { ChatMessage, ComparisonTask, Conversation, Evaluation, Experiment,
 export const DEFAULT_SYSTEMS: Record<Tier, string> = {
   flash: "flash-v19-sem_select", pro: "pro-v25", max: "max-v31",
 };
+
+export function restoreExperimentSetup(conversation: Conversation, defaults: Record<Tier, string> = DEFAULT_SYSTEMS) {
+  const answers = conversation.messages.filter(m => m.role === "assistant");
+  const latest = answers.at(-1);
+  const group = latest?.research?.comparisonId;
+  const peers = group ? answers.filter(m => m.research?.comparisonId === group) : [];
+  const primary = peers.find(m => !m.research?.comparisonParentRunId) ?? latest;
+  const secondary = peers.find(m => m.id !== primary?.id);
+  const pending = conversation.compareQueue?.find(task => task.comparisonId === group);
+  const tier = primary?.tier ?? conversation.tier;
+  return {tier, systemId:primary?.research?.systemId ?? primary?.experiment?.system_id ?? defaults[tier], compare:!!secondary || !!pending, compareSystemId:secondary?.research?.systemId ?? secondary?.experiment?.system_id ?? pending?.systemId ?? ""};
+}
 export const GENERATION_ACTIVE = new Set(["queued", "running", "streaming", "reviewing"]);
 const GENERATION_TERMINAL = new Set(["done", "error", "stopped", "interrupted"]);
 const EVALUATION_TERMINAL = new Set(["done", "completed", "complete", "success", "succeeded", "failed", "error", "cancelled", "canceled", "skipped", "not_authorized", "unavailable", "blocked", "interrupted", "unverified_gold"]);

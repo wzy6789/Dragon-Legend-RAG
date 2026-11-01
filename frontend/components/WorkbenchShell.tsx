@@ -1,8 +1,9 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import type { Conversation } from "@/lib/types";
 import HistoryList from "./HistoryList";
+import ReadingControls from "./ReadingControls";
 import { CloseIcon, PanelLeftIcon, PlusIcon, SearchIcon, SettingsIcon } from "./icons";
 
 export type WorkbenchView = "history" | "versions" | "benchmarks" | "reports";
@@ -39,7 +40,8 @@ interface Props {
 }
 
 export default function WorkbenchShell(p: Props) {
-  return <div className={`research-shell ${p.collapsed ? "is-collapsed" : ""} ${p.inspectorOpen ? "has-inspector" : "inspector-collapsed"}`}>
+  const [focused, setFocused] = useState(false);
+  return <div className={`research-shell ${focused && p.view === "history" ? "is-focused" : ""} ${p.collapsed ? "is-collapsed" : ""} ${p.inspectorOpen ? "has-inspector" : "inspector-collapsed"}`}>
     {p.mobileOpen && <button className="research-overlay sidebar-overlay" aria-label="关闭导航" onClick={() => p.onMobile(false)} />}
     <aside className={`research-sidebar ${p.mobileOpen ? "is-open" : ""}`} aria-label="研究导航">
       <div className="research-brand"><span className="brand-symbol" aria-hidden="true">R</span><div className="sidebar-label"><strong>RAG 实验台</strong></div>
@@ -57,7 +59,7 @@ export default function WorkbenchShell(p: Props) {
       </div>
     </aside>
     <main className="research-main">
-      <header className="research-topbar"><button className="icon-button mobile-menu" aria-label="打开导航" onClick={() => p.onMobile(true)}><PanelLeftIcon className="h-4 w-4" /></button><div className="topbar-title"><h1>{p.view === "history" ? p.title : NAV.find((item) => item.id === p.view)?.title}</h1></div><span className="connection-label" title={p.connection}><span className={`status-dot ${p.connection === "知识库已连接" ? "ready" : ""}`} /><span className="sr-only">{p.connection}</span></span><button className="quiet-button inspector-toggle" aria-expanded={p.inspectorOpen} onClick={p.onInspector}>{p.inspectorOpen ? "收起详情" : "详情"}</button></header>
+      <header className="research-topbar"><button className="icon-button mobile-menu" aria-label="打开导航" onClick={() => p.onMobile(true)}><PanelLeftIcon className="h-4 w-4" /></button><div className="topbar-title"><h1>{p.view === "history" ? p.title : NAV.find((item) => item.id === p.view)?.title}</h1></div><span className="connection-label" title={p.connection}><span className={`status-dot ${p.connection === "知识库已连接" ? "ready" : ""}`} /><span className="sr-only">{p.connection}</span></span>{p.view === "history" && <button className="focus-toggle" aria-pressed={focused} onClick={()=>setFocused(value=>!value)}>{focused ? "退出专注" : "专注"}</button>}<ReadingControls /><button className="quiet-button inspector-toggle" aria-expanded={p.inspectorOpen} onClick={p.onInspector}>{p.inspectorOpen ? "收起详情" : "详情"}</button></header>
       {p.children}
     </main>
     {p.inspectorOpen && <button className="research-overlay inspector-overlay" aria-label="关闭实验详情" onClick={p.onInspector} />}

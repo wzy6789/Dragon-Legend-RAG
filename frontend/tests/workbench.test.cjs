@@ -10,6 +10,15 @@ require.extensions['.ts'] = (module, filename) => {
 const workbench = require('../lib/workbench.ts');
 const api = require('../lib/api.ts');
 
+test('restore comparison selectors with A left, B right and original tier even after B completes',()=>{
+ const a={id:'a',role:'assistant',tier:'flash',research:{systemId:'flash-v19-sem_select',comparisonId:'g'}};
+ const b={id:'b',role:'assistant',tier:'max',research:{systemId:'max-v31',comparisonId:'g',comparisonParentRunId:'run-a'}};
+ const restored=workbench.restoreExperimentSetup({tier:'max',messages:[a,b]});
+ assert.deepEqual(restored,{tier:'flash',systemId:'flash-v19-sem_select',compare:true,compareSystemId:'max-v31'});
+ assert.equal(workbench.restoreExperimentSetup({tier:'pro',messages:[a,b,{id:'c',role:'assistant',tier:'pro',research:{systemId:'pro-v25'}}]}).compare,false);
+ assert.equal(workbench.restoreExperimentSetup({tier:'flash',messages:[a],compareQueue:[{comparisonId:'g',systemId:'max-v31'}]}).compareSystemId,'max-v31');
+});
+
 test('comparison inspection synchronizes both peers but no unrelated runs', () => {
   const messages=[{id:'a',role:'assistant',runId:'ra',research:{comparisonId:'pair'}},{id:'b',role:'assistant',runId:'rb',research:{comparisonId:'pair'}},{id:'c',role:'assistant',runId:'rc'}];
   assert.deepEqual(workbench.inspectionTargets(messages,'b').map(x=>x.id),['a','b']);

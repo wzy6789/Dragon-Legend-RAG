@@ -6,7 +6,7 @@ import { clearConversations, deleteConversation as deleteConversationRow, listCo
 import { clearStoredCredentials, loadStoredCredentials, saveStoredCredentials, loadStoredAdminSession, saveStoredAdminSession, clearStoredAdminSession } from "@/lib/credential-store";
 import { filterConversations, makeTitle } from "@/lib/history";
 import type { ApiError, Benchmark, BenchmarkQuestion, BrowserDelivery, ChatMessage, ComparisonTask, Conversation, ResearchRequest, ResearchSystem, RunEvent, RunSnapshot, SystemRegistry, Tier } from "@/lib/types";
-import { inspectionTargets, canRunSystem, DEFAULT_SYSTEMS, downloadFile, exportBatch, nextComparisonTask, shouldPollExperiment, withoutCredentials, type ExportFormat } from "@/lib/workbench";
+import { restoreExperimentSetup, inspectionTargets, canRunSystem, DEFAULT_SYSTEMS, downloadFile, exportBatch, nextComparisonTask, shouldPollExperiment, withoutCredentials, type ExportFormat } from "@/lib/workbench";
 import WorkbenchShell, { type WorkbenchView } from "./WorkbenchShell";
 import ExperimentInspector from "./ExperimentInspector";
 import AdminDialog from "./AdminDialog";
@@ -192,9 +192,9 @@ export default function Workspace() {
       setConversations(restored);
       if (restored.length) {
         setActiveId(restored[0].id);
-        setTier(restored[0].tier);
-        const latest = [...restored[0].messages].reverse().find((message) => message.role === "assistant");
-        setSystemId(latest?.research?.systemId ?? latest?.experiment?.system_id ?? DEFAULT_SYSTEMS[restored[0].tier]);
+        const setup = restoreExperimentSetup(restored[0]); setTier(setup.tier); setCompare(setup.compare); setCompareSystemId(setup.compareSystemId);
+
+        setSystemId(setup.systemId);
       }
     });
     return () => { alive = false; };
@@ -300,7 +300,7 @@ export default function Workspace() {
   }, [activeId, inspectedRuns, creds?.accessKey, experimentRefresh, updateRunMessage]);
   useEffect(() => {
     if (!active) return;
-    setTier(active.tier);
+    setTier(restoreExperimentSetup(active).tier);
   }, [activeId]);
 
   useEffect(() => {
@@ -703,9 +703,9 @@ export default function Workspace() {
     setMobileOpen(false);
     const conversation = convsRef.current.find((item) => item.id === id);
     if (conversation) {
-      setTier(conversation.tier);
-      const latest = [...conversation.messages].reverse().find((message) => message.role === "assistant");
-      setSystemId(latest?.research?.systemId ?? latest?.experiment?.system_id ?? registry.defaults[conversation.tier]);
+      const setup = restoreExperimentSetup(conversation, registry.defaults); setTier(setup.tier); setCompare(setup.compare); setCompareSystemId(setup.compareSystemId);
+
+      setSystemId(setup.systemId);
     }
     stickRef.current = true;
   }, [activeId, input, registry.defaults]);
@@ -876,13 +876,20 @@ export default function Workspace() {
       >
         {notice && <div className="workspace-notice" role="status"><span>{notice}</span><button onClick={() => setNotice("")}>关闭</button></div>}
         {view === "history" && <>
-          <div className="experiment-controls">
-            <div className="system-controls"><label className="stack-label tier-control"><span className="sr-only">档位</span><select aria-label="档位" value={tier} onChange={(event) => handleTierChange(event.target.value as Tier)}><option value="flash">Flash</option><option value="pro">Pro</option><option value="max">Max</option></select></label><label className="stack-label system-control"><span className="sr-only">系统版本</span><select aria-label="系统版本" value={systemId} onChange={(event) => setSystemId(event.target.value)}>{!compatibleSystems.some((system) => system.id === systemId) && <option value={systemId}>{systemId} · 等待注册表</option>}{compatibleSystems.map((system) => <option key={system.id} value={system.id} disabled={!canRunSystem(system, tier)}>{system.label}{system.status !== "runnable" ? ` · ${system.status === "pending" ? "待接入" : "历史归档"}` : ""}</option>)}</select></label><label className="compare-switch"><input type="checkbox" checked={compare} onChange={(event) => setCompare(event.target.checked)} />对比</label><details className="experiment-options"><summary>设置</summary><div className="experiment-options-body">
-            <div className="setup-caption"><span>{questionSelection ? `${questionSelection.bank.label} · ${questionSelection.question.id}` : "自由问题 · 在线诊断"}</span><button onClick={() => setView("benchmarks")}>选择题库</button></div>
-            <dl className="setup-metadata" aria-label="配置摘要"><div><dt>档位</dt><dd>{tier.toUpperCase()}</dd></div><div><dt>版本</dt><dd>{selectedSystem?.version || "未记录"}</dd></div><div><dt>变体</dt><dd>{selectedSystem?.variant || "未记录"}</dd></div><div><dt>所选运行模型</dt><dd>{activeAssistant?.experiment?.system_id === systemId ? activeAssistant.experiment.generation_model || "运行时记录" : "运行时记录"}</dd></div><div><dt>协议</dt><dd>{questionSelection?.bank.protocol_id || benchmarks.find((bank) => bank.id === "free")?.protocol_id || "未记录"}</dd></div></dl>
-            </div></details></div>
-            {compare && <div className="compare-controls"><label className="stack-label system-control"><span className="sr-only">第二个系统</span><select aria-label="第二个系统" value={compareSystemId} onChange={(event) => setCompareSystemId(event.target.value)}><option value="">选择第二个系统</option>{registry.systems.map((system) => <option key={system.id} value={system.id} disabled={system.status !== "runnable" || system.id === systemId || !system.tiers.some((value) => ["flash", "pro", "max"].includes(value))}>{system.label} · {system.family}{system.status !== "runnable" ? ` · ${system.status}` : ""}</option>)}</select></label></div>}
-            {questionSelection && <div className="selected-question">{questionSelection.bank.label} · {questionSelection.question.id}</div>}
+          <div className={`experiment-controls lab-controls${compare ? " is-comparing" : ""}`}>
+            <div className="lab-control-toolbar">
+              <label className="lab-tier"><span className="sr-only">档位</span><select aria-label="档位" value={tier} onChange={event=>handleTierChange(event.target.value as Tier)}><option value="flash">Flash</option><option value="pro">Pro</option><option value="max">Max</option></select></label>
+              <div className="lab-mode" role="group" aria-label="实验方式"><button aria-pressed={!compare} onClick={()=>setCompare(false)}>单版本</button><button aria-pressed={compare} onClick={()=>setCompare(true)}>双版本对比</button></div>
+              <button className="lab-bank" onClick={()=>setView("benchmarks")}>{questionSelection ? `${questionSelection.bank.label} · ${questionSelection.question.id}` : "自由问题"}</button>
+              <details className="experiment-options"><summary>实验设置</summary><div className="experiment-options-body">
+                <div className="setup-caption"><span>{questionSelection ? questionSelection.bank.label : "自由问题 · 在线诊断"}</span><button onClick={()=>setView("benchmarks")}>选择题库</button></div>
+                <dl className="setup-metadata" aria-label="配置摘要"><div><dt>档位</dt><dd>{tier.toUpperCase()}</dd></div><div><dt>版本</dt><dd>{selectedSystem?.version || "未记录"}</dd></div><div><dt>变体</dt><dd>{selectedSystem?.variant || "未记录"}</dd></div><div><dt>生成模型</dt><dd>{activeAssistant?.experiment?.system_id === systemId ? activeAssistant.experiment.generation_model || "运行时记录" : "运行时记录"}</dd></div><div><dt>评分协议</dt><dd>{questionSelection?.bank.protocol_id || benchmarks.find(bank=>bank.id==="free")?.protocol_id || "未记录"}</dd></div></dl>
+              </div></details>
+            </div>
+            <div className="lab-system-pair">
+              <label className="lab-system series-0"><span className="lab-system-label">{compare && <span className="series-key">A</span>}{compare ? "左侧版本" : "运行版本"}</span><select aria-label="系统版本" value={systemId} onChange={event=>setSystemId(event.target.value)}>{!compatibleSystems.some(system=>system.id===systemId) && <option value={systemId}>{systemId} · 等待注册表</option>}{compatibleSystems.map(system=><option key={system.id} value={system.id} disabled={!canRunSystem(system,tier)}>{system.label}{system.status!=="runnable" ? ` · ${system.status==="pending" ? "待接入" : "历史归档"}` : ""}</option>)}</select></label>
+              {compare && <label className="lab-system series-1"><span className="lab-system-label"><span className="series-key">B</span>右侧版本</span><select aria-label="第二个系统" value={compareSystemId} onChange={event=>setCompareSystemId(event.target.value)}><option value="">选择对比版本</option>{registry.systems.map(system=><option key={system.id} value={system.id} disabled={system.status!=="runnable" || system.id===systemId || !system.tiers.some(value=>["flash","pro","max"].includes(value))}>{system.label}{system.status!=="runnable" ? ` · ${system.status==="pending" ? "待接入" : "历史归档"}` : ""}</option>)}</select></label>}
+            </div>
             {registryError && <p className="inline-error">注册表加载失败：{registryError} <button onClick={() => setRegistryRefresh((value) => value + 1)}>重试</button></p>}
           </div>
           {!!assistantMessages.length && active && <div className="thread-toolbar"><button onClick={() => exportConversation(active, "md")}>导出对话</button></div>}

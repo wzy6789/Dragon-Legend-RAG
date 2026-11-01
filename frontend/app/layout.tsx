@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import "./globals.css";
 import "./workbench.css";
 import "./experiment-visuals.css";
+import "./reading-lab.css";
 
 export const metadata: Metadata = {
   title: "龙王传说 · 研究工作台",
