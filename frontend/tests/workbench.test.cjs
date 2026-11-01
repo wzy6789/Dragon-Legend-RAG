@@ -10,6 +10,17 @@ require.extensions['.ts'] = (module, filename) => {
 const workbench = require('../lib/workbench.ts');
 const api = require('../lib/api.ts');
 
+test('comparison feedback distinguishes terminal failures from waiting and incompatible scores',()=>{
+ const item=(status,evaluation)=>({message:{status},evaluation});
+ const feedback=entries=>workbench.comparisonFeedback({entries,comparable:false,reasons:[]});
+ assert.equal(feedback([item('done',{status:'error',score:0}),item('done',{status:'done',score:80})]).quality,'评分失败，查看详情');
+ assert.equal(feedback([item('error'),item('done')]).timing,'本次运行未完成');
+ assert.equal(feedback([item('done',{status:'done'}),item('done',{status:'done'})]).quality,'评分条件不一致');
+ assert.equal(feedback([item('done'),item('done',{status:'not_authorized'})]).quality,'尚未评分');
+ assert.equal(feedback([item('done',{status:'judging'}),item('done')]).quality,'正在独立评分');
+ assert.equal(feedback([item('done',{status:'blocked'}),item('done')]).quality,'评测暂不可用');
+});
+
 test('restore comparison selectors with A left, B right and original tier even after B completes',()=>{
  const a={id:'a',role:'assistant',tier:'flash',research:{systemId:'flash-v19-sem_select',comparisonId:'g'}};
  const b={id:'b',role:'assistant',tier:'max',research:{systemId:'max-v31',comparisonId:'g',comparisonParentRunId:'run-a'}};

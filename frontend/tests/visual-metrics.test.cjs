@@ -25,6 +25,15 @@ const message = (timeline, status = 'done') => ({
   experiment: { timeline },
 });
 
+test('failed or queued judge output is never drawn as a valid zero score',()=>{
+  for(const status of ['error','queued','judging','blocked']){
+    const visual=buildScoreVisual({...new49,status,score:0});
+    assert.equal(visual.total.percent,null);
+    assert.equal(visual.total.state,'missing');
+    assert.ok(visual.dimensions.every(row=>row.percent===null));
+  }
+});
+
 test('real 7D49 fixture uses total 100, dimensions 10, and percentage-point weights', () => {
   const visual = buildScoreVisual(new49);
   assert.equal(visual.total.scale, 100);

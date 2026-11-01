@@ -3,23 +3,11 @@
 import { useEffect, useState } from "react";
 import { asApiError, getArchive, getArchives } from "@/lib/api";
 import { Markdown } from "@/lib/markdown";
-import type { ArchiveBatch, ArchiveDocument, Benchmark, BenchmarkQuestion, Conversation, ResearchSystem } from "@/lib/types";
+import type { ArchiveBatch, ArchiveDocument, Conversation } from "@/lib/types";
 import { displayValue, downloadFile, withoutCredentials, type ExportFormat } from "@/lib/workbench";
 import LocalHistoryReports from "./LocalHistoryReports";
 
-export function VersionsPanel({ systems, onUse, onRetry, error }: { systems: ResearchSystem[]; onUse: (system: ResearchSystem) => void; onRetry: () => void; error: string }) {
-  const [filter, setFilter] = useState("all");
-  const visible = systems.filter((system) => filter === "all" || system.status === filter);
-  return <div className="research-page"><div className="page-intro"><span className="eyebrow">SYSTEM REGISTRY</span><h2>每次实验，都有明确的版本。</h2><p>Flash 每代保留 1–2 个代表版，Pro 与 Max 每代各一个；2.x 归属 Pro，3.x 归属 Max。选择版本后可直接提问或对比。</p></div><div className="page-toolbar"><label className="stack-label">版本状态<select value={filter} onChange={(event) => setFilter(event.target.value)}><option value="all">全部状态</option><option value="runnable">可运行</option><option value="pending">待接入</option><option value="archive">历史归档</option></select></label><button className="quiet-button" onClick={onRetry}>刷新注册表</button></div>{error && <p className="inline-error">{error}</p>}<div className="registry-list">{visible.map((system) => <article className="registry-card" key={system.id}><div className="registry-card-heading"><div><span className="eyebrow">{system.family} / {system.version}</span><h3>{system.label}</h3><code>{system.id}</code></div><span className={`status-badge status-${system.status}`}>{({ runnable: "可运行", pending: "待接入", archive: "历史归档" })[system.status]}</span></div><p>{system.notes || "未记录说明"}</p><div className="registry-meta"><span>变体：{system.variant || "未记录"}</span><span>档位：{system.tiers.join(" / ") || "未记录"}</span></div><details className="research-details"><summary>来源、配置与已有结果</summary><dl><dt>来源</dt><dd>{system.source || "未记录"}</dd></dl><pre>{displayValue(withoutCredentials({ config: system.config, results: system.results }))}</pre></details><button className="quiet-button" disabled={system.status !== "runnable" || !system.tiers.some((tier) => ["flash", "pro", "max"].includes(tier))} onClick={() => onUse(system)}>用于新实验 </button></article>)}</div>{!visible.length && <p className="empty-note">{error ? "注册表暂时不可用。请检查连接后刷新。" : "暂无对应版本，等待注册表加载。"}</p>}</div>;
-}
-
-export function BenchmarksPanel({ benchmarks, onPick, error }: { benchmarks: Benchmark[]; onPick: (bank: Benchmark, question: BenchmarkQuestion) => void; error: string }) {
-  const [bankId, setBankId] = useState("");
-  const [query, setQuery] = useState("");
-  const bank = benchmarks.find((item) => item.id === bankId) ?? benchmarks[0];
-  const questions = bank?.questions.filter((item) => `${item.id} ${item.question} ${item.type ?? ""}`.toLowerCase().includes(query.toLowerCase())) ?? [];
-  return <div className="research-page"><div className="page-intro"><span className="eyebrow">BENCHMARK LIBRARY</span><h2>在同一题目与协议下比较。</h2><p>选择原始题目后运行，题库、题号与评测协议随运行记录保存。</p></div>{error && <p className="inline-error">{error}</p>}<div className="benchmark-tabs">{benchmarks.map((item) => <button key={item.id} className={bank?.id === item.id ? "active" : ""} onClick={() => setBankId(item.id)}>{item.label}<span>{item.questions.length}</span></button>)}</div><div className="page-toolbar"><label className="research-search"><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索题目、题号或类型" aria-label="搜索题库" /></label><span className="muted">协议：{bank?.protocol_id || "未记录"}</span></div><div className="question-list">{questions.map((question) => <article key={question.id} className="question-card"><div className="question-id"><code>{question.id}</code><span>{question.type || "未记录类型"}</span></div><p>{question.question}</p>{question.context != null && <details className="research-details"><summary>题目上下文</summary><pre>{displayValue(question.context)}</pre></details>}{question.runnable === false && <p className="inline-error">{question.reason || "此题暂不可运行"}</p>}<button className="quiet-button" disabled={question.runnable === false} onClick={() => bank && onPick(bank, question)}>载入工作台 </button></article>)}</div>{!questions.length && <p className="empty-note">{benchmarks.length ? "没有匹配的题目。" : "尚未加载题库。"}</p>}</div>;
-}
+export { VersionsPanel, BenchmarksPanel } from "./CatalogPanels";
 
 interface ReportsProps { conversations: Conversation[]; onExport: (conversation: Conversation, format: ExportFormat) => void; onSelect: (id: string) => void; accessKey: string; adminToken: string; onLogin: () => void; onAdminExpired: () => void }
 export function ReportsPanel(p: ReportsProps) {

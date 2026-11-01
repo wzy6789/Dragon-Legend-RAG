@@ -1,9 +1,10 @@
 "use client";
 import type { Evaluation } from "@/lib/types";
-import { compareResults, comparisonSides, compareExecution, displayValue, evaluationLabel, formatMs, systemLabel } from "@/lib/workbench";
+import { comparisonFeedback, compareResults, comparisonSides, compareExecution, displayValue, evaluationLabel, formatMs, systemLabel } from "@/lib/workbench";
 
 function value(e?: Evaluation) {
-  if (typeof e?.score !== "number" || !Number.isFinite(e.score)) return evaluationLabel(e);
+  if (evaluationLabel(e)!=="已评分") return evaluationLabel(e);
+  if (typeof e?.score !== "number" || !Number.isFinite(e.score)) return "分数未记录";
   return `${Number(e.score.toFixed(2))}${typeof e.score_scale === "number" ? ` / ${e.score_scale}` : ""}`;
 }
 function valid(n: unknown): n is number { return typeof n === "number" && Number.isFinite(n) && n >= 0; }
@@ -11,12 +12,13 @@ export default function ComparisonResults({ result }: { result: ReturnType<typeo
   const timing = compareExecution(result.entries);
   const entries = comparisonSides(result.entries);
   const maxTime = Math.max(...entries.map(e => e?.message.experiment?.metrics?.execution_ms).filter(valid), 1);
-  const quality = result.comparable ? result.delta === 0 ? "本题质量评分相同" : `${result.delta! > 0 ? "B" : "A"} 高 ${Number(Math.abs(result.delta!).toFixed(2))} 分` : "等待可比评分";
+  const feedback = comparisonFeedback(result);
+  const quality = feedback.quality;
   return <section className="comparison-results comparison-summary" aria-label="质量与速度对照"><div className="comparison-overview">
     <div className="compare-metric"><div className="compare-metric-title"><span>回答质量</span><span className="metric-tag">{result.entries[0]?.message.experiment?.benchmark_id === "free" ? "在线诊断" : "协议评测"}</span></div><h3>{quality}</h3>
       <div className="paired-meters">{entries.map((entry,i)=>{const e=entry?.evaluation,scale=e?.score_scale;const usable=evaluationLabel(e)==="已评分"&&valid(e?.score)&&valid(scale)&&scale>0&&e.score<=scale;return <div className={`paired-meter series-${i}`} key={i}><span className="series-key">{i?"B":"A"}</span><div className="meter-track" aria-hidden="true">{usable&&<span style={{width:`${e!.score!/scale!*100}%`}}/>}</div><strong>{value(e)}</strong></div>;})}</div><p>{result.comparable ? "相同题目、上下文、裁判与评分标准" : "评分完成且口径一致后显示分差"}</p>
     </div>
-    <div className="compare-metric"><div className="compare-metric-title"><span>回答速度</span><span className="metric-tag">不含排队</span></div><h3>{timing.delta===undefined?"等待完整耗时":timing.delta===0?"本次耗时相同":`${timing.delta<0?"B":"A"} 少用 ${formatMs(Math.abs(timing.delta))}`}</h3>
+    <div className="compare-metric"><div className="compare-metric-title"><span>回答速度</span><span className="metric-tag">不含排队</span></div><h3>{timing.delta===undefined?feedback.timing:timing.delta===0?"本次耗时相同":`${timing.delta<0?"B":"A"} 少用 ${formatMs(Math.abs(timing.delta))}`}</h3>
       <div className="paired-meters">{entries.map((entry,i)=>{const time=entry?.message.experiment?.metrics?.execution_ms;return <div className={`paired-meter series-${i}`} key={i}><span className="series-key">{i?"B":"A"}</span><div className="meter-track" aria-hidden="true">{valid(time)&&<span style={{width:`${time/maxTime*100}%`}}/>}</div><strong>{formatMs(time)}</strong></div>;})}</div><p>柱长代表本次执行耗时，越短越快</p>
     </div></div>
     <details className="comparison-numbers"><summary>查看原始数据与比较条件</summary><div className="report-table-scroll"><table className="research-data-table comparison-matrix"><caption className="sr-only">两个版本的原始数据</caption><thead><tr><th>指标</th>{entries.map((e,i)=><th key={i}><span className={`series-key series-${i}`}>{i?"B":"A"}</span> {e?systemLabel(e.message):"等待记录"}</th>)}</tr></thead><tbody>

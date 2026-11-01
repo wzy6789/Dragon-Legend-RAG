@@ -151,7 +151,31 @@ export function evaluationLabel(evaluation?: Evaluation): string {
   if (["pending_generation","queued"].includes(status)) return "等待评分";
   if (["running","scoring","judging"].includes(status)) return "评分中";
   if (["done","completed","complete","success","succeeded"].includes(status)) return "已评分";
+  if (["error","failed"].includes(status)) return "评分失败";
+  if (["blocked","unavailable","unverified_gold"].includes(status)) return "评测暂不可用";
+  if (["interrupted","cancelled","canceled"].includes(status)) return "评分已中断";
   return "评分未完成";
+}
+
+export function comparisonFeedback(result: ReturnType<typeof compareResults>) {
+  const entries = result.entries;
+  const incomplete = entries.some(({message:m})=>["error","stopped","interrupted"].includes(m.status??"") || m.status==="done" && !!m.completionStatus && m.completionStatus!=="complete");
+  const active = entries.some(({message})=>GENERATION_ACTIVE.has(message.status??""));
+  const labels = entries.map(e=>evaluationLabel(e.evaluation));
+  let quality = "暂不可比较";
+  if (result.comparable) quality = result.delta===0 ? "本题质量评分相同" : `${result.delta!>0?"B":"A"} 高 ${Number(Math.abs(result.delta!).toFixed(2))} 分`;
+  else if (incomplete) quality = "回答未完整完成";
+  else if (active) quality = "等待回答完成";
+  else if (entries.length<2) quality = "等待另一份回答";
+  else if (labels.includes("评分失败")) quality = "评分失败，查看详情";
+  else if (labels.includes("评测暂不可用")) quality = "评测暂不可用";
+  else if (labels.includes("评分已中断")) quality = "评分已中断";
+  else if (labels.includes("评分中")) quality = "正在独立评分";
+  else if (labels.includes("等待评分")) quality = "等待评分队列";
+  else if (labels.every(s=>s==="未评分")) quality = "尚未评分";
+  else if (labels.every(s=>s==="已评分")) quality = "评分条件不一致";
+  else if (labels.includes("未评分")) quality = "另一份回答尚未评分";
+  return {quality,timing:incomplete?"本次运行未完成":active?"等待完整耗时":entries.length<2?"等待另一份回答":"仅展示原始耗时"};
 }
 
 export function compareResults(messages: ChatMessage[], comparisonId: string): { entries: ComparisonEntry[]; comparable: boolean; reasons: string[]; delta?: number } {

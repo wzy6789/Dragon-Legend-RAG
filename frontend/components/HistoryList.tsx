@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { formatRelative, groupConversations } from "@/lib/history";
+import { summarizeExperimentHistory } from "@/lib/experiment-history";
 import type { Conversation } from "@/lib/types";
 import { PencilIcon, TrashIcon } from "./icons";
 
@@ -55,14 +56,13 @@ export default function HistoryList({
           <ul className="space-y-2">
             {group.items.map((c) => {
               const active = c.id === activeId;
-              const latestAnswer = [...c.messages].reverse().find((message) => message.role === "assistant");
-              const status = latestAnswer?.status;
-              const running = status === "queued" || status === "running" || status === "streaming" || status === "reviewing";
+              const experiment = summarizeExperimentHistory(c);
               if (editingId === c.id) {
                 return (
                   <li key={c.id} className="px-1">
                     <input
                       autoFocus
+                      aria-label="重命名对话"
                       value={draft}
                       onChange={(e) => setDraft(e.target.value)}
                       onBlur={() => commit(c.id)}
@@ -86,7 +86,8 @@ export default function HistoryList({
                     <button
                       type="button"
                       onClick={() => onSelect(c.id)}
-                      title={c.title}
+                      title={`${c.title}\n${experiment.title}\n${experiment.status} · ${formatRelative(c.updatedAt)}`}
+                      aria-current={active ? "true" : undefined}
                       className="flex min-w-0 flex-1 flex-col items-start py-3 text-left"
                     >
                       <span
@@ -98,9 +99,10 @@ export default function HistoryList({
                         {c.title}
                       </span>
                       {!collapsed && (
-                        <span className="flex w-full items-center gap-1.5 text-[13px] text-ink-faint">
-                          {running ? <><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-gold-400" />{status === "queued" ? "排队中" : "回答生成中"}<span className="text-ink-faint/50">·</span></> : null}
-                          <span>{formatRelative(c.updatedAt)}</span>
+                        <span className="history-experiment-meta flex w-full min-w-0 items-center gap-1.5 text-[13px] text-ink-faint">
+                          <span className="min-w-0 truncate" title={experiment.title}>{experiment.label}</span>
+                          <span aria-hidden="true" className="text-ink-faint/50">·</span>
+                          <span className="history-experiment-status shrink-0" data-state={experiment.state}>{experiment.status}</span>
                         </span>
                       )}
                     </button>

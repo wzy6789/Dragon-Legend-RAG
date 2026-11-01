@@ -38,6 +38,7 @@ function metric(key: string, label: string, value: unknown, scale: number | null
 
 /** Safe chart values for either comparison side. Never recomputes or rescales a scorer's result. */
 export function buildScoreVisual(evaluation?: Evaluation): { total: ScoreMetric; dimensions: ScoreMetric[]; notes: string[] } {
+  const finalized = ["done", "completed", "complete", "success", "succeeded"].includes(evaluation?.status ?? "");
   const protocolId = evaluation?.protocol_id ?? "";
   const protocol = Object.hasOwn(PROTOCOL_SCALES, protocolId) ? PROTOCOL_SCALES[protocolId] : undefined;
   const recordedScale = evaluation?.score_scale;
@@ -45,8 +46,8 @@ export function buildScoreVisual(evaluation?: Evaluation): { total: ScoreMetric;
   const validScale = finite(recordedScale) && recordedScale > 0;
   const conflict = Boolean(protocol && hasScale && recordedScale !== protocol.total);
   const totalScale = hasScale ? validScale && !conflict ? recordedScale : null : protocol?.total ?? null;
-  const total = metric("total", "总分", evaluation?.score, totalScale);
-  const entries = evaluation?.dimensions && typeof evaluation.dimensions === "object" && !Array.isArray(evaluation.dimensions) ? evaluation.dimensions : {};
+  const total = metric("total", "总分", finalized ? evaluation?.score : undefined, totalScale);
+  const entries = finalized && evaluation?.dimensions && typeof evaluation.dimensions === "object" && !Array.isArray(evaluation.dimensions) ? evaluation.dimensions : {};
   const names: Record<string, string> = Object.fromEntries(DIMENSIONS);
   const keys = protocol ? [...DIMENSIONS.map(([key]) => key), ...Object.keys(entries).filter(key => !Object.hasOwn(names, key))] : Object.keys(entries);
   const dimensions = keys.map(key => {
@@ -58,6 +59,7 @@ export function buildScoreVisual(evaluation?: Evaluation): { total: ScoreMetric;
     return row;
   });
   const notes: string[] = [];
+  if (evaluation && !finalized) notes.push("评测尚未成功完成，暂不展示有效分数。");
   if (conflict) notes.push("总分量纲与协议冲突，暂不绘制总分比例。");
   else if (hasScale && !validScale) notes.push("总分量纲无效，暂不绘制总分比例。");
   if (totalScale === null && !hasScale && evaluation) notes.push("总分量纲未记录，仅展示原始分值。");

@@ -27,7 +27,7 @@ export default function RunJourney({ message, compact = false }: { message: Chat
     <p className="journey-note">时间保留后端 at_ms 原值；阶段上报不代表完成，不推算阶段耗时。</p>
   </>;
   return <section className={`journey${compact ? " journey-compact" : ""}`} aria-label="可观测运行过程">
-    {compact ? <details className="journey-disclosure"><summary>运行过程 · {groups.length} 个阶段 <span className="journey-status">{status}</span></summary>{content}</details>
+    {compact ? <details className="journey-disclosure"><summary>{groups.length ? `运行过程 · ${groups.length} 个阶段` : active ? "等待过程记录" : "过程未记录"}<span className="journey-status">{status}</span></summary>{content}</details>
       : <><div className="journey-header"><h3>运行过程</h3><span className="journey-status">{status}</span></div>{content}</>}
   </section>;
 }

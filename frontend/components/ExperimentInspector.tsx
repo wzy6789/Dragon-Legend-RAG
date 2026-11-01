@@ -2,7 +2,7 @@
 
 import { useId, useRef, useState } from "react";
 import type { ChatMessage } from "@/lib/types";
-import { displayValue, formatMs, withoutCredentials } from "@/lib/workbench";
+import { comparisonRunStatus, evaluationLabel, systemLabel, displayValue, formatMs, withoutCredentials } from "@/lib/workbench";
 import ScoreVisual from "./ScoreVisual";
 import RunJourney from "./RunJourney";
 
@@ -38,7 +38,7 @@ export default function ExperimentInspector(p: Props) {
     <div className="inspector-heading"><h2>实验详情</h2></div>
     <div className="inspector-run-select"><label htmlFor={instanceId + "-run"}>查看回答</label><select id={instanceId + "-run"} value={p.selectedId ?? ""} onChange={event => p.onSelect(event.target.value)} disabled={!p.messages.length}>
       {!p.messages.length && <option value="">尚无运行记录</option>}
-      {p.messages.map((item, index) => <option key={item.id} value={item.id}>#{index + 1} · {item.experiment?.system_id ?? item.research?.systemId ?? item.version ?? "未记录版本"} · {item.status ?? "未记录"}</option>)}
+      {p.messages.map((item, index) => <option key={item.id} value={item.id}>#{index + 1} · {systemLabel(item)} · {comparisonRunStatus(item)}</option>)}
     </select></div>
     <div className="inspector-tabs" role="tablist" aria-label="实验信息">{TABS.map((item, index) => <button key={item.id} type="button" role="tab" ref={node => { tabButtons.current[index] = node; }} id={instanceId + "-" + item.id} aria-controls={instanceId + "-content"} aria-selected={tab === item.id} tabIndex={tab === item.id ? 0 : -1} onClick={() => setTab(item.id)} onKeyDown={event => {
       const next = event.key === "ArrowRight" ? (index + 1) % TABS.length : event.key === "ArrowLeft" ? (index + TABS.length - 1) % TABS.length : event.key === "Home" ? 0 : event.key === "End" ? TABS.length - 1 : null;
@@ -75,7 +75,7 @@ export default function ExperimentInspector(p: Props) {
         </>}
         {tab === "score" && <>
           <span className="eyebrow">{free ? "在线诊断" : "协议评测"}</span>
-          {evaluations.length > 0 && <label className="stack-label">评测记录<select value={evaluation?.id ?? ""} onChange={event => setEvaluationId(event.target.value)}>{evaluations.map((item, index) => <option key={item.id} value={item.id}>第 {index + 1} 次 · {item.status}</option>)}</select></label>}
+          {evaluations.length > 0 && <label className="stack-label">评测记录<select value={evaluation?.id ?? ""} onChange={event => setEvaluationId(event.target.value)}>{evaluations.map((item, index) => <option key={item.id} value={item.id}>第 {index + 1} 次 · {evaluationLabel(item)}</option>)}</select></label>}
           <ScoreVisual evaluation={evaluation} />
           <p className="muted">评分来自独立评审模型。自由问题的在线诊断不计入基准成绩。</p>
           {evaluation?.error && <p className="inline-error">{evaluation.error}</p>}
