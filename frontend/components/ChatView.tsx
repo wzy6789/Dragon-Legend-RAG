@@ -1,7 +1,7 @@
 "use client";
 
 import type { RefObject } from "react";
-import type { ChatMessage } from "@/lib/types";
+import type { ChatMessage, InspectorTab } from "@/lib/types";
 import EmptyState from "./EmptyState";
 import MessageItem from "./MessageItem";
 import ComparisonGroup from "./ComparisonGroup";
@@ -16,7 +16,7 @@ interface Props {
   onScroll: () => void;
   showLatest: boolean;
   onLatest: () => void;
-  onInspect: (id: string) => void;
+  onInspect: (id: string, tab?: InspectorTab) => void;
   selectedId?: string;
   busy: boolean;
   pendingComparison?: { comparisonId?: string; label: string };

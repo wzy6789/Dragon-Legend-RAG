@@ -1,11 +1,11 @@
 "use client";
 
 import { useLayoutEffect, useRef, useState, type UIEvent } from "react";
-import type { ChatMessage } from "@/lib/types";
+import type { ChatMessage, InspectorTab } from "@/lib/types";
 import { compareResults, comparisonSides, comparisonRunStatus, formatMs, systemLabel } from "@/lib/workbench";
 import ComparisonResults from "./ComparisonResults";
 import MessageItem from "./MessageItem";
-import ScoreVisual from "./ScoreVisual";
+import ScoreComparison from "./ScoreComparison";
 import RunJourney from "./RunJourney";
 
 interface Props {
@@ -14,7 +14,7 @@ interface Props {
   pendingLabel?: string;
   busy: boolean;
   selectedId?: string;
-  onInspect: (id: string) => void;
+  onInspect: (id: string, tab?: InspectorTab) => void;
   onRegenerate: (id: string) => void;
   onDelete: (id: string) => void;
 }
@@ -62,7 +62,8 @@ export default function ComparisonGroup(p: Props) {
     <div className="compare-identity-legend">{sides.map((e,i)=><div key={i} className={`series-${i}`}><span className="series-key">{i?"B":"A"}</span><span>{e?systemLabel(e.message):p.pendingLabel || "等待回答"}</span></div>)}</div>
     <ComparisonResults result={result} />
     <div className="compare-view-tabs" role="group" aria-label="对比内容">{([{id:"answers",label:"完整回答"},{id:"scores",label:"评分维度"},{id:"journey",label:"执行过程"}] as const).map(item=><button key={item.id} aria-pressed={view===item.id} onClick={()=>setView(item.id)}>{item.label}</button>)}</div>
-    {view !== "answers" && <div className="comparison-columns" role="region" aria-label="左右评分与过程对照" tabIndex={0}><div className="comparison-grid comparison-analytics">{sides.map((e,i)=><section className={`compare-analysis-panel series-${i}`} key={i}><h3><span className="series-key">{i?"B":"A"}</span>{e?systemLabel(e.message):"等待回答"}</h3>{e ? view === "scores" ? <ScoreVisual evaluation={e.evaluation} /> : <RunJourney message={e.message} /> : <p className="muted">本组尚无对应记录</p>}</section>)}</div></div>}
+    {view === "scores" && <ScoreComparison result={result} onInspect={id => p.onInspect(id, "score")} />}
+    {view === "journey" && <div className="comparison-columns" role="region" aria-label="左右执行过程对照" tabIndex={0}><div className="comparison-grid comparison-analytics">{sides.map((e,i)=><section className={`compare-analysis-panel series-${i}`} key={i}><h3><span className="series-key">{i?"B":"A"}</span>{e?systemLabel(e.message):"等待回答"}</h3>{e ? <><RunJourney message={e.message} /><button type="button" className="journey-inspect" onClick={()=>p.onInspect(e.message.id,"timeline")}>查看 {i?"B":"A"} 过程详情</button></> : <p className="muted">本组尚无对应记录</p>}</section>)}</div></div>}
     <div className="comparison-columns" hidden={view !== "answers"} role="region" aria-label="左右答案对照" tabIndex={0}>
     <div className="comparison-grid">
       {sides.map((entry,index)=>{
@@ -70,7 +71,7 @@ export default function ComparisonGroup(p: Props) {
         if (!entry) return <div className="comparison-waiting" key={letter}><span className="comparison-letter">{letter}</span><h3>{index===1 && p.pendingLabel ? p.pendingLabel : `系统 ${letter}`}</h3><p>{index===1 && p.pendingLabel ? "等待 A 结束后开始" : "本组尚无对应回答记录"}</p></div>;
         const message=entry.message;
         return <div key={message.id} data-message-id={message.id} className={`answer-card comparison-answer series-${index}${p.selectedId===message.id?" is-selected":""}`}>
-          <header className="comparison-answer-heading"><div><span className="comparison-letter">{letter}</span><h3>{systemLabel(message)}</h3></div><div className="comparison-answer-actions"><span className="status-badge">{comparisonRunStatus(message)}</span><span>服务端首段 {formatMs(message.experiment?.metrics?.ttft_ms)}</span><button type="button" onClick={()=>p.onInspect(message.id)}>查看证据与详情</button></div></header>
+          <header className="comparison-answer-heading"><div><span className="comparison-letter">{letter}</span><h3>{systemLabel(message)}</h3></div><div className="comparison-answer-actions"><span className="status-badge">{comparisonRunStatus(message)}</span><span>服务端首段 {formatMs(message.experiment?.metrics?.ttft_ms)}</span><button type="button" onClick={()=>p.onInspect(message.id,"evidence")}>查看证据与详情</button></div></header>
           <div className="comparison-answer-scroll" ref={el=>{panes.current[index]=el;}} onScroll={e=>onScroll(index,e)} tabIndex={0} role="region" aria-label={`${letter} 的回答`}>
             <MessageItem message={message} hideHeading onRegenerate={p.busy?undefined:p.onRegenerate} onDelete={p.onDelete} />
           </div>

@@ -1,4 +1,5 @@
 import type { ChatMessage, ComparisonTask, Conversation, Evaluation, Experiment, ResearchSystem, Tier } from "./types";
+import { buildScoreVisual } from "./visual-metrics";
 
 export const DEFAULT_SYSTEMS: Record<Tier, string> = {
   flash: "flash-v19-sem_select", pro: "pro-v25", max: "max-v31",
@@ -199,10 +200,16 @@ export function compareResults(messages: ChatMessage[], comparisonId: string): {
   else if (ja.scorer_fingerprint !== jb.scorer_fingerprint) reasons.push("评分器身份不一致：scorer_fingerprint 不同。");
   if (!ja?.judge_model?.trim() || ja.judge_model !== jb?.judge_model) reasons.push("评审模型缺失或不同。");
   if (!ja?.type?.trim() || ja.type !== jb?.type) reasons.push("冻结评分题型未记录或不一致。");
-  if (typeof ja?.score_scale === "number" && typeof jb?.score_scale === "number" && ja.score_scale !== jb.score_scale) reasons.push("原始评分量程不同。");
+  const va = buildScoreVisual(ja), vb = buildScoreVisual(jb);
+  if (va.total.state !== "recorded" || vb.total.state !== "recorded" || va.total.scale !== vb.total.scale) reasons.push("总分或评分量尺无效、未知或不一致。");
+  if (va.dimensions.some(left => {
+    const right = vb.dimensions.find(row => row.key === left.key);
+    return left.weightPercent != null && right?.weightPercent != null && left.weightPercent !== right.weightPercent;
+  })) reasons.push("已记录的维度权重不一致。");
   const scoreA = ja?.score, scoreB = jb?.score;
   if (typeof scoreA !== "number" || !Number.isFinite(scoreA) || typeof scoreB !== "number" || !Number.isFinite(scoreB)) reasons.push("两条有效原始分数尚未齐全。");
   if (![a, b].every((entry) => entry.message.status === "done" && ["done", "completed", "complete", "success", "succeeded"].includes(entry.evaluation?.status ?? ""))) reasons.push("生成或评测尚未成功完成。");
+  if ([a, b].some(entry => entry.message.completionStatus && entry.message.completionStatus !== "complete")) reasons.push("回答未完整完成，不能判定质量胜出。");
   return { entries, comparable: !reasons.length, reasons, ...(reasons.length ? {} : { delta: (scoreB as number) - (scoreA as number) }) };
 }
 

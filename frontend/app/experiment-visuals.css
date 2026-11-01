@@ -155,3 +155,67 @@
 @media (max-width: 767px) {
   .side-by-side .comparison-grid { min-width: 640px; gap: 16px; }
 }
+
+/* Aligned measurements keep A left and B right, with raw differences beside them. */
+.dimension-comparison { border: 1px solid #ffffff1c; background: #08090a; border-radius: 12px; min-width: 0; overflow: hidden; }
+.dimension-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 18px; flex-wrap: wrap; padding: 24px; }
+.dimension-toolbar h3 { font-size: 17px; font-weight: 550; color: #edf1f7; }
+.dimension-toolbar p { color: #98a4b3; font-size: 13px; line-height: 1.8; margin-top: 7px; }
+.dimension-controls { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; font-size: 13px; }
+.dimension-controls label { display: inline-flex; align-items: center; gap: 8px; min-height: 40px; color: #c7d0dc; }
+.dimension-controls input { width: 16px; height: 16px; accent-color: #81aaff; }
+.dimension-controls select { width: auto; min-height: 40px; font-size: 13px; }
+.dimension-table-scroll { overflow-x: auto; max-width: 100%; overscroll-behavior-x: contain; }
+.dimension-table { width: 100%; min-width: 620px; table-layout: fixed; border-collapse: collapse; font-size: 14px; }
+.dimension-table th, .dimension-table td { padding: 18px 24px; border-top: 1px solid #ffffff10; text-align: left; vertical-align: middle; }
+.dimension-table thead th { color: #cbd4df; font-size: 13px; font-weight: 500; background: #111318; }
+.dimension-table thead th:first-child { width: 19%; }
+.dimension-table thead th:last-child { width: 18%; }
+.dimension-table thead .series-key { margin-bottom: 8px; }
+.dimension-table thead .series-key + span { display: block; overflow-wrap: anywhere; line-height: 1.7; }
+.dimension-table tbody th { color: #d7e0eb; font-weight: 500; overflow-wrap: anywhere; }
+.dimension-table tbody tr:hover { background: #ffffff03; }
+.dimension-value > div:first-child { font-variant-numeric: tabular-nums; }
+.dimension-value strong { color: #f0f3f8; font: 500 20px var(--font-technical); }
+.dimension-value span, .dimension-value small { font-size: 12px; color: #93a1b2; }
+.dimension-value small { display: block; margin-top: 7px; }
+.dimension-track { height: 6px; background: #ffffff0a; border-radius: 8px; margin-top: 10px; overflow: hidden; }
+.dimension-track > span { display: block; height: 100%; background: var(--series-color); border-radius: inherit; }
+.dimension-delta strong { display: inline-block; border: 1px solid color-mix(in srgb,var(--series-color) 27%,transparent); padding: 6px 10px; border-radius: 6px; background: color-mix(in srgb,var(--series-color) 7%,transparent); color: var(--series-color); font-size: 14px; font-weight: 550; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.dimension-delta > span { color: #9ba8b8; font-size: 13px; }
+.dimension-footer { border-top: 1px solid #ffffff14; padding: 20px 24px; display: flex; gap: 16px; justify-content: space-between; align-items: center; flex-wrap: wrap; }
+.dimension-footer p { font-size: 12px; color: #94a2b4; line-height: 1.8; }
+.dimension-footer > div { display: flex; gap: 10px; flex-wrap: wrap; }
+.dimension-footer button, .journey-inspect { min-height: 40px; color: var(--series-color); padding: 8px 12px; border: 1px solid #ffffff1a; border-radius: 7px; font-size: 13px; }
+.dimension-footer button:hover, .journey-inspect:hover { background: #ffffff06; border-color: var(--series-color); }
+.dimension-empty { padding: 24px; color: #a2afbe; line-height: 1.8; font-size: 14px; }
+.journey-stage-card { border: 1px solid #ffffff16; border-radius: 9px; background: #0d1014; overflow: hidden; }
+.journey-content { flex: 1; min-width: 0; }
+.journey-stage-card > summary { display: flex; align-items: center; gap: 12px; padding: 14px; cursor: pointer; list-style: none; }
+.journey-stage-card > summary::-webkit-details-marker { display: none; }
+.journey-stage-card > summary::after { content: '+'; font-size: 18px; color: #a0aec0; flex: 0 0 auto; }
+.journey-stage-card[open] > summary::after { content: '−'; }
+.journey-stage-card > summary:hover { background: #ffffff04; }
+.journey-step-index { color: var(--series-color); font: 12px var(--font-technical); }
+.journey-stage-title { flex: 1; min-width: 0; }
+.journey-stage-title strong { display: block; font-weight: 500; font-size: 14px; line-height: 1.6; }
+.journey-stage-title .journey-count { display: block; margin-top: 5px; color: #8d9aac; font-size: 11px; }
+.journey-stage-card > summary .journey-time { white-space: nowrap; font-size: 12px; color: #b2c0d2; }
+.journey-stage-card .journey-events { border-top: 1px solid #ffffff12; padding: 8px 14px 14px; margin: 0; }
+.journey-stage-card .journey-events > div { display: grid; gap: 5px; margin-top: 10px; overflow-wrap: anywhere; }
+.journey-item { padding-bottom: 14px; gap: 12px; }
+.journey-marker { margin-top: 25px; }
+.journey-item:not(:last-child)::before { top: 33px; }
+.journey-method { color: #93a3b7; font-size: 12px; margin-top: 14px; }
+.journey-method > summary { cursor: pointer; min-height: 30px; list-style: none; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.journey-method > summary::-webkit-details-marker { display: none; }
+.journey-method > summary::after { content: '+'; font-size: 16px; }
+.journey-method[open] > summary::after { content: '−'; }
+.journey-inspect { width: 100%; margin-top: 10px; }
+@media (max-width: 767px) {
+  .dimension-toolbar, .dimension-footer { padding: 18px; }
+  .dimension-table th, .dimension-table td { padding: 16px; }
+  .dimension-toolbar h3 { font-size: 16px; }
+  .dimension-controls { width: 100%; justify-content: space-between; gap: 10px; }
+  .dimension-controls select { max-width: 170px; }
+}

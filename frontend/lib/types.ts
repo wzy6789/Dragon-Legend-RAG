@@ -136,6 +136,7 @@ export interface SourceItem {
 }
 
 export type ChatRole = "user" | "assistant";
+export type InspectorTab = "overview" | "score" | "evidence" | "timeline";
 
 export type MessageStatus =
   | "queued"

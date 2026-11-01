@@ -2,7 +2,7 @@
 
 import { memo, useEffect, useState } from "react";
 import { Markdown } from "@/lib/markdown";
-import type { ChatMessage } from "@/lib/types";
+import type { ChatMessage, InspectorTab } from "@/lib/types";
 import { CheckIcon, CopyIcon, TrashIcon } from "./icons";
 import { formatMs, evaluationLabel } from "@/lib/workbench";
 import RunJourney from "./RunJourney";
@@ -37,7 +37,7 @@ interface Props {
   message: ChatMessage;
   onRegenerate?: (messageId: string) => void;
   onDelete?: (messageId: string) => void;
-  onInspect?: (messageId: string) => void;
+  onInspect?: (messageId: string, tab?: InspectorTab) => void;
   hideHeading?: boolean;
 }
 
@@ -84,7 +84,7 @@ function MessageItemImpl({ message, onRegenerate, onDelete, onInspect, hideHeadi
   return (
     <article className="group animate-fade-in">
       {!hideHeading && <div className="answer-heading"><span>{message.experiment?.system_snapshot?.label || message.experiment?.system_id || message.research?.systemId || message.version || "未记录版本"}</span></div>}
-      {!hideHeading && <div className="answer-measurements"><span>服务端首段 <b>{formatMs(message.experiment?.metrics?.ttft_ms)}</b></span><span>完成 <b>{formatMs(message.experiment?.metrics?.e2e_ms)}</b></span><button onClick={()=>onInspect?.(message.id)} disabled={!onInspect}>质量 <b>{evaluationLabel(evaluation)==="已评分" && typeof evaluation?.score === "number" ? `${Number(evaluation.score.toFixed(2))}${evaluation.score_scale ? ` / ${evaluation.score_scale}` : ""}` : evaluationLabel(evaluation)}</b></button></div>}
+      {!hideHeading && <div className="answer-measurements"><span>服务端首段 <b>{formatMs(message.experiment?.metrics?.ttft_ms)}</b></span><span>完成 <b>{formatMs(message.experiment?.metrics?.e2e_ms)}</b></span><button onClick={()=>onInspect?.(message.id,"score")} disabled={!onInspect}>质量 <b>{evaluationLabel(evaluation)==="已评分" && typeof evaluation?.score === "number" ? `${Number(evaluation.score.toFixed(2))}${evaluation.score_scale ? ` / ${evaluation.score_scale}` : ""}` : evaluationLabel(evaluation)}</b></button></div>}
       {active ? <LiveStatus message={message} /> : null}
       <RunJourney message={message} compact />
       {message.provisional && message.content ? <div className="mb-2 inline-flex rounded-full border border-gold-500/20 bg-gold-500/[0.07] px-2 py-0.5 text-[13px] text-gold-300">待核验草稿</div> : null}

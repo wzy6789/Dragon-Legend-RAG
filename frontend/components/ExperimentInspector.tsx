@@ -1,7 +1,7 @@
 "use client";
 
-import { useId, useRef, useState } from "react";
-import type { ChatMessage } from "@/lib/types";
+import { useId, useRef } from "react";
+import type { ChatMessage, InspectorTab } from "@/lib/types";
 import { comparisonRunStatus, evaluationLabel, systemLabel, displayValue, formatMs, withoutCredentials } from "@/lib/workbench";
 import ScoreVisual from "./ScoreVisual";
 import RunJourney from "./RunJourney";
@@ -21,11 +21,15 @@ interface Props {
   onEvaluate: () => void;
   evaluating: boolean;
   error: string;
+  tab: InspectorTab;
+  onTabChange: (tab: InspectorTab) => void;
+  evaluationId: string;
+  onEvaluationChange: (id: string) => void;
 }
 
 export default function ExperimentInspector(p: Props) {
-  const [tab, setTab] = useState<(typeof TABS)[number]["id"]>("overview");
-  const [evaluationId, setEvaluationId] = useState("");
+  const { tab, onTabChange: setTab } = p;
+  const { evaluationId, onEvaluationChange: setEvaluationId } = p;
   const instanceId = useId();
   const tabButtons = useRef<(HTMLButtonElement | null)[]>([]);
   const message = p.message;

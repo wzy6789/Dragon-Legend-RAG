@@ -15,6 +15,7 @@ import ChatView from "./ChatView";
 import ConfirmDialog from "./ConfirmDialog";
 import LoginGate from "./LoginGate";
 import SettingsDialog from "./SettingsDialog";
+import type { InspectorTab } from "@/lib/types";
 
 function newId(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
@@ -70,6 +71,8 @@ export default function Workspace() {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [evidenceOpen, setEvidenceOpen] = useState(false);
+  const [inspectorTab, setInspectorTab] = useState<InspectorTab>("overview");
+  const [inspectorEvaluationId, setInspectorEvaluationId] = useState("");
   const [connection, setConnection] = useState<"checking" | "ready" | "offline">("checking");
   const [view, setView] = useState<WorkbenchView>("history");
   const [registry, setRegistry] = useState<SystemRegistry>({ systems: [], defaults: DEFAULT_SYSTEMS });
@@ -878,7 +881,7 @@ export default function Workspace() {
         onDelete={(id) => void removeConversation(id)}
         onSettings={() => setSettingsOpen(true)}
         onClear={() => setConfirmClearOpen(true)}
-        inspector={<ExperimentInspector messages={assistantMessages} selectedId={activeAssistant?.id ?? null} onSelect={setSelectedMessageId} message={activeAssistant} admin={Boolean(adminToken)} onLogin={() => setAdminOpen(true)} onEvaluate={() => void rejudge()} evaluating={evaluating} error={experimentError} />}
+        inspector={<ExperimentInspector messages={assistantMessages} selectedId={activeAssistant?.id ?? null} onSelect={id => { setSelectedMessageId(id); setInspectorEvaluationId(""); }} message={activeAssistant} admin={Boolean(adminToken)} onLogin={() => setAdminOpen(true)} onEvaluate={() => void rejudge()} evaluating={evaluating} error={experimentError} tab={inspectorTab} onTabChange={setInspectorTab} evaluationId={inspectorEvaluationId} onEvaluationChange={setInspectorEvaluationId} />}
       >
         {notice && <div className="workspace-notice" role="status"><span>{notice}</span><button onClick={() => setNotice("")}>关闭</button></div>}
         {view === "history" && <>
@@ -899,12 +902,12 @@ export default function Workspace() {
             {registryError && <p className="inline-error">注册表加载失败：{registryError} <button onClick={() => setRegistryRefresh((value) => value + 1)}>重试</button></p>}
           </div>
           {!!assistantMessages.length && active && <div className="thread-toolbar"><button onClick={() => exportConversation(active, "md")}>导出对话</button></div>}
-          <ChatView messages={active?.messages ?? []} onPick={() => setView("benchmarks")} onRegenerate={regenerate} onDeleteMessage={deleteMessage} scrollRef={scrollRef} bottomRef={bottomRef} onScroll={onScroll} showLatest={showLatest} onLatest={scrollToLatest} onInspect={(id) => { setSelectedMessageId(id); setEvidenceOpen(true); }} selectedId={activeAssistant?.id} busy={Boolean(activeRun) || comparisonBusy} pendingComparison={active?.compareQueue?.[0] ? { comparisonId: active.compareQueue[0].comparisonId, label: registry.systems.find((s) => s.id === active.compareQueue?.[0]?.systemId)?.label || active.compareQueue[0].systemId } : undefined} />
+          <ChatView messages={active?.messages ?? []} onPick={() => setView("benchmarks")} onRegenerate={regenerate} onDeleteMessage={deleteMessage} scrollRef={scrollRef} bottomRef={bottomRef} onScroll={onScroll} showLatest={showLatest} onLatest={scrollToLatest} onInspect={(id, tab = "overview") => { setSelectedMessageId(id); setInspectorTab(tab); setInspectorEvaluationId(""); setEvidenceOpen(true); }} selectedId={activeAssistant?.id} busy={Boolean(activeRun) || comparisonBusy} pendingComparison={active?.compareQueue?.[0] ? { comparisonId: active.compareQueue[0].comparisonId, label: registry.systems.find((s) => s.id === active.compareQueue?.[0]?.systemId)?.label || active.compareQueue[0].systemId } : undefined} />
           <div className="research-composer"><div className="research-composer-input"><textarea ref={inputRef} value={input} rows={2} maxLength={4000} aria-label="输入研究问题" title="Enter 发送，Shift + Enter 换行" placeholder="输入问题…" onChange={(event) => { setInput(event.target.value); if (questionSelection && event.target.value !== questionSelection.question.question) setQuestionSelection(null); }} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); send(); } }} /><div className="composer-actions"><span>{activeRun || comparisonBusy ? "后台运行中" : input.length >= 3200 ? `${input.length}/4000` : ""}</span>{activeRun || comparisonBusy ? <button className="quiet-button" onClick={() => void stopActiveRun()}>停止</button> : <button className="primary-button" disabled={!input.trim() || !canSubmit} onClick={send}>{compare ? "开始对比" : "发送"}</button>}</div></div></div>
         </>}
         {view === "versions" && <VersionsPanel systems={registry.systems} error={registryError} onRetry={() => setRegistryRefresh((value) => value + 1)} onUse={(system: ResearchSystem) => { const selectedTier = system.tiers.find((value): value is Tier => ["flash", "pro", "max"].includes(value)); if (!selectedTier) return; handleTierChange(selectedTier); setSystemId(system.id); setView("history"); }} />}
         {view === "benchmarks" && <BenchmarksPanel benchmarks={benchmarks} onPick={pickQuestion} error={benchmarkError} />}
-        {view === "reports" && <ReportsPanel conversations={conversations} onExport={exportConversation} onSelect={selectConversation} onInspect={(conversationId,messageId)=>{selectConversation(conversationId);setSelectedMessageId(messageId);setEvidenceOpen(true)}} accessKey={creds.accessKey} adminToken={adminToken} onLogin={() => setAdminOpen(true)} onAdminExpired={expireAdmin} />}
+        {view === "reports" && <ReportsPanel conversations={conversations} onExport={exportConversation} onSelect={selectConversation} onInspect={(conversationId,messageId)=>{selectConversation(conversationId);setSelectedMessageId(messageId);setInspectorTab("overview");setInspectorEvaluationId("");setEvidenceOpen(true)}} accessKey={creds.accessKey} adminToken={adminToken} onLogin={() => setAdminOpen(true)} onAdminExpired={expireAdmin} />}
       </WorkbenchShell>
 
       <AdminDialog open={adminOpen} authenticated={Boolean(adminToken)} configured={adminConfigured} busy={adminBusy} error={adminError} onLogin={(password) => void signInAdmin(password)} onLogout={() => { if (creds && adminToken) void logoutAdmin(creds.accessKey, adminToken).catch(() => setNotice("当前浏览器已退出；服务端会话暂未撤销，请恢复连接后重试。")); clearStoredAdminSession(); setAdminToken(""); setAdminExpires(null); setAdminError(""); }} onClose={() => setAdminOpen(false)} />

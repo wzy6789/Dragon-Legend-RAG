@@ -1,5 +1,6 @@
 "use client";
 import type { Evaluation } from "@/lib/types";
+import { buildScoreVisual } from "@/lib/visual-metrics";
 import { comparisonFeedback, compareResults, comparisonSides, compareExecution, displayValue, evaluationLabel, formatMs, systemLabel } from "@/lib/workbench";
 
 function value(e?: Evaluation) {
@@ -16,7 +17,7 @@ export default function ComparisonResults({ result }: { result: ReturnType<typeo
   const quality = feedback.quality;
   return <section className="comparison-results comparison-summary" aria-label="质量与速度对照"><div className="comparison-overview">
     <div className="compare-metric"><div className="compare-metric-title"><span>回答质量</span><span className="metric-tag">{result.entries[0]?.message.experiment?.benchmark_id === "free" ? "在线诊断" : "协议评测"}</span></div><h3>{quality}</h3>
-      <div className="paired-meters">{entries.map((entry,i)=>{const e=entry?.evaluation,scale=e?.score_scale;const usable=evaluationLabel(e)==="已评分"&&valid(e?.score)&&valid(scale)&&scale>0&&e.score<=scale;return <div className={`paired-meter series-${i}`} key={i}><span className="series-key">{i?"B":"A"}</span><div className="meter-track" aria-hidden="true">{usable&&<span style={{width:`${e!.score!/scale!*100}%`}}/>}</div><strong>{value(e)}</strong></div>;})}</div><p>{result.comparable ? "相同题目、上下文、裁判与评分标准" : "评分完成且口径一致后显示分差"}</p>
+      <div className="paired-meters">{entries.map((entry,i)=>{const e=entry?.evaluation,total=buildScoreVisual(e).total;return <div className={`paired-meter series-${i}`} key={i}><span className="series-key">{i?"B":"A"}</span><div className="meter-track" aria-hidden="true">{total.percent!==null&&<span style={{width:`${total.percent}%`}}/>}</div><strong>{value(e)}</strong></div>;})}</div><p>{result.comparable ? "相同题目、上下文、裁判与评分标准" : "评分完成且口径一致后显示分差"}</p>
     </div>
     <div className="compare-metric"><div className="compare-metric-title"><span>回答速度</span><span className="metric-tag">不含排队</span></div><h3>{timing.delta===undefined?feedback.timing:timing.delta===0?"本次耗时相同":`${timing.delta<0?"B":"A"} 少用 ${formatMs(Math.abs(timing.delta))}`}</h3>
       <div className="paired-meters">{entries.map((entry,i)=>{const time=entry?.message.experiment?.metrics?.execution_ms;return <div className={`paired-meter series-${i}`} key={i}><span className="series-key">{i?"B":"A"}</span><div className="meter-track" aria-hidden="true">{valid(time)&&<span style={{width:`${time/maxTime*100}%`}}/>}</div><strong>{formatMs(time)}</strong></div>;})}</div><p>柱长代表本次执行耗时，越短越快</p>
